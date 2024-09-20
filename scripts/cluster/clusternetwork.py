@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
 from mpl_toolkits.mplot3d import Axes3D
+from datetime import datetime
 import os
 
 class ClusterNetwork:
@@ -62,14 +63,43 @@ class ClusterNetwork:
         return networks
 
     ## -- PDB File Generation
-    def write_individual_cluster_pdb_files(self, pdb_handler, output_directory):
+    @staticmethod
+    def _create_output_folder(output_path, folder_name):
+        """
+        Creates an output folder. If the folder exists, appends a timestamp.
+        
+        Parameters:
+        - output_path (str): Path to the output directory.
+        - folder_name (str): Name of the folder to create.
+        
+        Returns:
+        - full_output_path (str): The full path of the created folder.
+        """
+        full_output_path = os.path.join(output_path, folder_name)
+
+        # If the folder already exists, append timestamp
+        if os.path.exists(full_output_path):
+            timestamp = datetime.now().strftime("_%y%m%d_%H%M%S")
+            folder_name = folder_name + timestamp
+            full_output_path = os.path.join(output_path, folder_name)
+            print(f"Folder already exists. Creating folder with timestamp: {folder_name}")
+        
+        # Create the directory
+        os.makedirs(full_output_path, exist_ok=True)
+        return full_output_path
+
+    def write_individual_cluster_pdb_files(self, pdb_handler, output_path, folder_name):
         """
         Writes separate PDB files for each unique cluster with the original residue names preserved.
         
         Parameters:
         - pdb_handler (PDBFileHandler): The PDB file handler containing atom data.
-        - output_directory (str): The directory where the PDB files will be saved.
+        - output_path (str): The base directory where the PDB files will be saved.
+        - folder_name (str): The name of the folder to create in the output directory.
         """
+        # Create the output folder
+        full_output_path = self._create_output_folder(output_path, folder_name)
+
         # Extract the original filename without the extension
         original_filename = os.path.splitext(os.path.basename(pdb_handler.filepath))[0]
 
@@ -83,17 +113,30 @@ class ClusterNetwork:
 
             # Generate a new file name with the original filename and the network ID
             output_filename = f"{original_filename}_{network_id}.pdb"
-            output_path = os.path.join(output_directory, output_filename)
+            output_path = os.path.join(full_output_path, output_filename)
 
             # Write the atoms to a new PDB file
             pdb_handler.write_pdb_file(output_path, atoms=cluster_atoms)
             print(f"Written PDB file for cluster {network_id} to {output_path}")
 
-    def write_cluster_pdb_files_with_coordinated_shell(self, pdb_handler, output_directory, target_elements, neighbor_elements, distance_thresholds, shell_residue_names):
+    def write_cluster_pdb_files_with_coordinated_shell(self, pdb_handler, output_path, folder_name, target_elements, neighbor_elements, distance_thresholds, shell_residue_names):
         """
         Writes separate PDB files for each unique cluster with the original residue names and numbers preserved,
         and optionally includes shell residues that are coordinated to the cluster.
+        
+        Parameters:
+        - pdb_handler (PDBFileHandler): The PDB file handler containing atom data.
+        - output_path (str): The base directory where the PDB files will be saved.
+        - folder_name (str): The name of the folder to create in the output directory.
+        - target_elements (list): The list of target elements to include.
+        - neighbor_elements (list): The list of neighbor elements to include.
+        - distance_thresholds (dict): A dictionary of distance thresholds for atom pairs.
+        - shell_residue_names (list): List of shell residue names to include.
         """
+        # Create the output folder
+        full_output_path = self._create_output_folder(output_path, folder_name)
+
+        # Extract the original filename without the extension
         original_filename = os.path.splitext(os.path.basename(pdb_handler.filepath))[0]
 
         for network_id in self.analyze_networks():
@@ -117,11 +160,36 @@ class ClusterNetwork:
             atoms_to_write.extend(cluster_atoms)
 
             output_filename = f"{original_filename}_{network_id}.pdb"
-            output_path = os.path.join(output_directory, output_filename)
+            output_path = os.path.join(full_output_path, output_filename)
 
             pdb_handler.write_pdb_file(output_path, atoms=atoms_to_write)
             print(f"Written PDB file for cluster {network_id} with coordinated shell residues to {output_path}")
 
+    def rename_clusters_in_pdb(self, pdb_handler, output_path, output_filename):
+        """
+        Identifies unique clusters from the input PDB file, assigns a unique residue name to each cluster,
+        and writes a single PDB file with updated residue names for the clusters.
+
+        Parameters:
+        - pdb_handler (PDBFileHandler): The PDB file handler containing atom data.
+        - output_path (str): The directory where the new PDB file will be saved.
+        - output_filename (str): The name of the output PDB file.
+        """
+        # Analyze the networks to identify clusters and assign unique network IDs
+        networks = self.analyze_networks()
+
+        # Update residue names of all atoms based on their assigned network ID (3-character residue names)
+        updated_atoms = pdb_handler.core_atoms + pdb_handler.shell_atoms
+        for atom in updated_atoms:
+            if atom.network_id:
+                atom.residue_name = atom.network_id  # Set network ID as residue name (3 characters)
+
+        # Generate the output PDB file with the updated residue names
+        output_file_path = os.path.join(output_path, output_filename)
+        pdb_handler.write_pdb_file(output_file_path, atoms=updated_atoms)
+
+        print(f"Clusters identified, residue names updated, and saved to {output_file_path}")
+        
     ## -- Coordination Number & Bond Distribution Analysis
     def calculate_coordination_numbers(self, target_elements, neighbor_elements, distance_thresholds):
         coordination_numbers = defaultdict(list)
