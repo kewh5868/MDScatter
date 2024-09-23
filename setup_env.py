@@ -19,6 +19,7 @@ def setup_imports():
     from conversion.pdbhandler import PDBFileHandler, Atom
     from cluster.clusternetwork import ClusterNetwork
     from cluster.clusterbatchanalyzer import ClusterBatchAnalyzer
+    from cluster.radiusofgyration import RadiusOfGyrationCalculator
     
     from conversion.trajectory import TrajectoryProcessor
     from conversion.pdbeditor import PDBEditor
@@ -26,7 +27,7 @@ def setup_imports():
     print("Class imports have been set up.")
 
     # Return the imported classes
-    return PDBEditor, TrajectoryProcessor, PDBFileHandler, Atom, ClusterNetwork, ClusterBatchAnalyzer
+    return RadiusOfGyrationCalculator, PDBEditor, TrajectoryProcessor, PDBFileHandler, Atom, ClusterNetwork, ClusterBatchAnalyzer
 
 def setup_environment():
     # Setup paths and return the imported classes

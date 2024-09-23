@@ -189,7 +189,79 @@ class ClusterNetwork:
         pdb_handler.write_pdb_file(output_file_path, atoms=updated_atoms)
 
         print(f"Clusters identified, residue names updated, and saved to {output_file_path}")
-        
+
+    ## -- Atom Count Validation Methods
+    def count_linker_elements_in_input_pdb(self, pdb_handler):
+        """
+        Count the number of each linker element in the input PDB file.
+
+        Parameters:
+        - pdb_handler (PDBFileHandler): The PDB file handler containing atom data.
+
+        Returns:
+        - linker_element_counts (dict): A dictionary with the counts of each linker element in the input PDB.
+        """
+        linker_element_counts = {element: 0 for element in self.linker_elements}
+
+        # Iterate over core atoms and count linker elements
+        for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
+            if atom.element in self.linker_elements:
+                linker_element_counts[atom.element] += 1
+
+        print("Linker element counts in input PDB:")
+        for element, count in linker_element_counts.items():
+            print(f"{element}: {count}")
+
+        return linker_element_counts
+
+    def count_linker_elements_in_output_pdb_files(self, output_directory, folder_name, pdb_handler):
+        """
+        Count the number of each linker element across all output PDB files and verify they match the input PDB counts.
+
+        Parameters:
+        - output_directory (str): The base directory where the output PDB files are stored.
+        - folder_name (str): The folder name where PDB files were saved.
+        - pdb_handler (PDBFileHandler): The PDB file handler for the input file, used for comparison.
+        """
+        # Construct the full path to the output PDB folder
+        output_pdb_folder = os.path.join(output_directory, folder_name)
+
+        # Call the method to count linker elements in the input PDB file
+        input_linker_counts = self.count_linker_elements_in_input_pdb(pdb_handler)
+        output_linker_counts = {element: 0 for element in self.linker_elements}
+
+        # Iterate over each output PDB file and count linker elements
+        for pdb_filename in os.listdir(output_pdb_folder):
+            if pdb_filename.endswith(".pdb"):
+                pdb_filepath = os.path.join(output_pdb_folder, pdb_filename)
+
+                # Open the PDB file and count the linker elements
+                with open(pdb_filepath, 'r') as pdb_file:
+                    for line in pdb_file:
+                        if line.startswith("ATOM") or line.startswith("HETATM"):
+                            atom_element = line[76:78].strip()
+                            if atom_element in self.linker_elements:
+                                output_linker_counts[atom_element] += 1
+
+        # Output the results
+        print("\nLinker element counts in output PDB files:")
+        for element, count in output_linker_counts.items():
+            print(f"{element}: {count}")
+
+        # Verify the counts between input and output
+        all_match = True
+        for element in self.linker_elements:
+            if input_linker_counts[element] != output_linker_counts[element]:
+                all_match = False
+                print(f"Mismatch for {element}: Input count = {input_linker_counts[element]}, Output count = {output_linker_counts[element]}")
+            else:
+                print(f"{element} count matches between input and output.")
+
+        if all_match:
+            print("\nAll linker element counts match between the input PDB and output PDB files.")
+        else:
+            print("\nWarning: Some linker element counts do not match between the input PDB and output PDB files.")
+
     ## -- Coordination Number & Bond Distribution Analysis
     def calculate_coordination_numbers(self, target_elements, neighbor_elements, distance_thresholds):
         coordination_numbers = defaultdict(list)

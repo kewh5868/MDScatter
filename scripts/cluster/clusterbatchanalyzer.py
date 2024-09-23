@@ -10,10 +10,13 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from tqdm.notebook import tqdm  # Import for Jupyter Notebook visual progress bar
+import mendeleev
 from mendeleev import element  # To fetch ionic radii
 from datetime import datetime
+from collections import defaultdict
 
 from conversion.pdbhandler import PDBFileHandler
+from cluster.radiusofgyration import RadiusOfGyrationCalculator
 
 class ClusterBatchAnalyzer:
     def __init__(self, pdb_directory, target_elements, neighbor_elements, distance_thresholds, 
@@ -32,6 +35,9 @@ class ClusterBatchAnalyzer:
         self.volume_method = volume_method
         self.copy_no_target_files = copy_no_target_files
         self.no_target_atoms_files = []
+
+        self.sorted_folder = None  # Attribute to store the sorted folder path
+        self.no_node_elements_folder = None  # Attribute for storing path for files with no node elements
         
         # Only build the ionic radius lookup table if required
         if self.volume_method == 'ionic_radius':
@@ -86,8 +92,83 @@ class ClusterBatchAnalyzer:
 
         return thread_count
     
-    ## -- Cluster Analysis Methods
+    def generate_ascii_table(self, multiplicity_counts, title="Multiplicity Counts"):
+        """
+        Generate and print an ASCII table from the given multiplicity counts.
 
+        Parameters:
+        - multiplicity_counts (dict): A nested dictionary {element: {multiplicity: count}}
+        - title (str): Title of the table
+        """
+        import pandas as pd
+
+        # Find all unique multiplicities
+        multiplicities = set()
+        for counts in multiplicity_counts.values():
+            multiplicities.update(counts.keys())
+        multiplicities = sorted(multiplicities)
+
+        # Create a DataFrame
+        df = pd.DataFrame(index=sorted(multiplicity_counts.keys()), columns=multiplicities).fillna(0)
+
+        # Fill the DataFrame
+        for element, counts in multiplicity_counts.items():
+            for multiplicity, count in counts.items():
+                df.loc[element, multiplicity] = count
+
+        # Convert DataFrame to ASCII table
+        print(f"\n{title}")
+        print(df.to_string())
+
+    ## -- File Sorting Methods
+    def sort_pdb_files_by_node_count(self, node_elements):
+        """
+        Sort PDB files into subfolders based on the count of node elements in each file.
+        The sorted subfolders are placed in a new directory with 'sorted_' as a prefix to the original folder name.
+        
+        Parameters:
+        - node_elements (list): List of node elements to count in each PDB file (e.g., ['Pb']).
+        """
+        # Create a new folder named 'sorted_<original_folder_name>'
+        original_folder_name = os.path.basename(self.pdb_directory)
+        self.sorted_folder = os.path.join(os.path.dirname(self.pdb_directory), f'sorted_{original_folder_name}')
+        os.makedirs(self.sorted_folder, exist_ok=True)
+
+        # Folder to handle cases with no node elements (ac000)
+        self.no_node_elements_folder = os.path.join(self.sorted_folder, f'node_no_element_ac000')
+        os.makedirs(self.no_node_elements_folder, exist_ok=True)
+
+        # Loop through each PDB file and count node elements
+        for pdb_file in self.pdb_files:
+            pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names, 
+                                         shell_residue_names=self.shell_residue_names)
+
+            # Count the node elements in the PDB file
+            node_count = defaultdict(int)
+            for atom in pdb_handler.core_atoms:
+                if atom.element in node_elements:
+                    node_count[atom.element] += 1
+
+            if node_count:  # If node elements are found
+                for node_element, count in node_count.items():
+                    # Format the folder name based on the node element and its count (e.g., node_Pb_ac005)
+                    folder_name = f'node_{node_element}_ac{count:03}'
+                    folder_path = os.path.join(self.sorted_folder, folder_name)
+                    os.makedirs(folder_path, exist_ok=True)
+
+                    # Copy the PDB file to the appropriate subfolder
+                    output_file_path = os.path.join(folder_path, os.path.basename(pdb_file))
+                    shutil.copy2(pdb_file, output_file_path)
+
+                    print(f"Copied {pdb_file} to {output_file_path}")
+            else:  # If no node elements are found, place in 'node_no_element_ac000' folder
+                output_file_path = os.path.join(self.no_node_elements_folder, os.path.basename(pdb_file))
+                shutil.copy2(pdb_file, output_file_path)
+                print(f"Copied {pdb_file} to {self.no_node_elements_folder}")
+
+        print(f"Sorted PDB files are stored in: {self.sorted_folder}")
+
+    ## -- Cluster Analysis Methods
     def analyze_clusters(self, shape_type='sphere', output_folder='no_target_atoms', copy_no_target_files=False):
         all_cluster_sizes = []
         coordination_stats_per_size = defaultdict(lambda: defaultdict(list))
@@ -272,6 +353,194 @@ class ClusterBatchAnalyzer:
                 total += avg
             print(f"  Total Coordination Number: {total:.2f}\n")
 
+    ## -- Coordination Number Calculation by Cluster Size
+    def calculate_coordination_numbers_for_atom(self, pdb_handler, target_atom, neighbor_elements, distance_thresholds=None):
+        """
+        Calculate the coordination number for a single atom within a PDB file,
+        including tracking which neighbor atoms are coordinated to the target atom.
+
+        Parameters:
+        - pdb_handler (PDBFileHandler): The PDB file handler containing atom data.
+        - target_atom (Atom): The target atom for which the coordination number is being calculated.
+        - neighbor_elements (list): List of neighbor elements to calculate coordination with.
+        - distance_thresholds (dict, optional): Dictionary of distance thresholds for atom pairs, e.g., {('Pb', 'I'): 3.6}.
+
+        Returns:
+        - coordination_stats (dict): Dictionary containing the coordination stats for the target atom.
+        - neighbor_atom_ids (set): Set of neighbor atom IDs coordinated with the target atom.
+        - counting_stats (dict): A dictionary tracking how many times each neighbor atom was counted, keyed by atom ID.
+        """
+        # Initialize coordination number tracking
+        coordination_numbers = defaultdict(int)
+        counting_stats = defaultdict(lambda: {'count': 0, 'element': None})  # Track counts per neighbor Atom ID
+        neighbor_atom_ids = set()  # Track neighbor atom IDs coordinated with the target atom
+
+        for other_atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
+            if other_atom.element in neighbor_elements:
+                pair = (target_atom.element, other_atom.element)
+                if distance_thresholds and pair in distance_thresholds:
+                    threshold = distance_thresholds[pair]
+                    if not self.are_connected(target_atom, other_atom, threshold):
+                        continue
+
+                # Double counting is always enabled
+                coordination_numbers[other_atom.element] += 1
+                counting_stats[other_atom.atom_id]['count'] += 1
+                counting_stats[other_atom.atom_id]['element'] = other_atom.element
+                neighbor_atom_ids.add(other_atom.atom_id)
+
+        total_coordination = sum(coordination_numbers.values())
+
+        # Store coordination stats
+        coordination_stats = {}
+        for neighbor in neighbor_elements:
+            count = coordination_numbers.get(neighbor, 0)
+            coordination_stats[(target_atom.element, neighbor)] = (count, 0)  # No std deviation for single atom
+
+        # Return the coordination stats, neighbor atom IDs, and counting stats per neighbor atom
+        return coordination_stats, neighbor_atom_ids, counting_stats
+
+
+    def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
+        """
+        Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
+        track how many times each neighbor atom was counted in each PDB file, and identify sharing patterns.
+
+        Parameters:
+        - sorted_pdb_folder (str, optional): Path to the sorted PDB folder. If not provided,
+        the method will use the class attribute `self.sorted_pdb_folder`.
+        - target_elements (list, required): List of target elements to calculate coordination for.
+        - neighbor_elements (list, required): List of neighbor elements to calculate coordination with.
+        - distance_thresholds (dict, required): Dictionary with distance thresholds for each atom pair (e.g., {('Pb', 'I'): 3.6}).
+
+        Returns:
+        - subfolder_coordination_stats (dict): Dictionary with subfolder names as keys and coordination stats as values.
+        - sharing_patterns (dict): Dictionary containing counts of sharing patterns across all PDB files.
+        """
+        if target_elements is None or neighbor_elements is None or distance_thresholds is None:
+            raise ValueError("target_elements, neighbor_elements, and distance_thresholds must all be provided.")
+
+        if sorted_pdb_folder:
+            self.sorted_pdb_folder = sorted_pdb_folder
+        elif not hasattr(self, 'sorted_pdb_folder') or not os.path.exists(self.sorted_pdb_folder):
+            raise ValueError("Sorted PDB folder not found. Please run sort_pdb_files_by_node_count first or provide a sorted path.")
+
+        subfolder_coordination_stats = {}
+        self.coordination_details = defaultdict(list)
+        self.per_file_neighbor_counts = defaultdict(dict)  # Store per-PDB-file neighbor counts
+        self.per_folder_multiplicity_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # Per-folder counts
+        self.overall_multiplicity_counts = defaultdict(lambda: defaultdict(int))  # Overall counts across all folders
+        sharing_patterns = defaultdict(int)  # Counts of sharing patterns across all PDB files
+
+        subfolders = os.listdir(self.sorted_pdb_folder)
+        overall_progress_bar = tqdm(total=len(subfolders), desc="Processing subfolders", ncols=100)
+
+        for subfolder in subfolders:
+            subfolder_path = os.path.join(self.sorted_pdb_folder, subfolder)
+            if os.path.isdir(subfolder_path):
+                pdb_files = [os.path.join(subfolder_path, f) for f in os.listdir(subfolder_path) if f.endswith('.pdb')]
+                subfolder_stats = defaultdict(list)
+
+                file_progress_bar = tqdm(total=len(pdb_files), desc=f"Processing files in {subfolder}", ncols=100)
+                for pdb_file in pdb_files:
+                    pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names,
+                                                shell_residue_names=self.shell_residue_names)
+
+                    # Create a mapping from atom IDs to atom objects
+                    pdb_handler.atom_id_map = {}
+                    for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
+                        pdb_handler.atom_id_map[atom.atom_id] = atom
+
+                    target_atoms = [atom for atom in pdb_handler.core_atoms if atom.element in target_elements]
+
+                    if target_atoms:
+                        file_neighbor_counts = defaultdict(lambda: {'count': 0, 'element': None})
+                        neighbor_to_targets = defaultdict(set)  # Mapping from neighbor atom ID to set of target atom IDs
+                        target_to_neighbors = defaultdict(set)  # Mapping from target atom ID to set of neighbor atom IDs
+
+                        for target_atom in target_atoms:
+                            coordination_stats, neighbor_atom_ids, counting_stats = self.calculate_coordination_numbers_for_atom(
+                                pdb_handler, target_atom, neighbor_elements, distance_thresholds
+                            )
+
+                            for pair, (coordination_number, _) in coordination_stats.items():
+                                subfolder_stats[pair].append(coordination_number)
+
+                            # Update mappings
+                            target_to_neighbors[target_atom.atom_id] = neighbor_atom_ids
+                            for neighbor_atom_id in neighbor_atom_ids:
+                                neighbor_to_targets[neighbor_atom_id].add(target_atom.atom_id)
+
+                            # Update file_neighbor_counts with counts from this target atom
+                            for neighbor_atom_id, stats in counting_stats.items():
+                                file_neighbor_counts[neighbor_atom_id]['count'] += stats['count']
+                                file_neighbor_counts[neighbor_atom_id]['element'] = stats['element']
+
+                            self.coordination_details[pdb_file].append({
+                                'target_atom_id': target_atom.atom_id,
+                                'target_atom_element': target_atom.element,
+                                'coordination_stats': coordination_stats,
+                                'neighbor_atom_ids': neighbor_atom_ids,
+                                'counting_stats': counting_stats
+                            })
+
+                        # After processing all target atoms, store the per-PDB-file neighbor counts
+                        self.per_file_neighbor_counts[pdb_file] = file_neighbor_counts
+
+                        # Aggregate counts per neighbor element and multiplicity for the current PDB file
+                        for neighbor_atom_id, stats in file_neighbor_counts.items():
+                            element = stats['element']
+                            multiplicity = stats['count']
+                            # Update per-folder counts
+                            self.per_folder_multiplicity_counts[subfolder][element][multiplicity] += 1
+                            # Update overall counts
+                            self.overall_multiplicity_counts[element][multiplicity] += 1
+
+                        # Identify sharing patterns
+                        # Group neighbor atoms by the set of target atoms they are coordinated with
+                        neighbor_groups = defaultdict(list)
+                        for neighbor_atom_id, target_atom_ids_set in neighbor_to_targets.items():
+                            key = frozenset(target_atom_ids_set)
+                            neighbor_groups[key].append(neighbor_atom_id)
+
+                        for target_atom_ids_set, neighbor_atom_ids in neighbor_groups.items():
+                            num_targets = len(target_atom_ids_set)
+                            num_neighbors = len(neighbor_atom_ids)
+
+                            if num_targets > 1:
+                                # Get the element names
+                                target_elements_involved = set()
+                                for target_atom_id in target_atom_ids_set:
+                                    target_atom = pdb_handler.atom_id_map[target_atom_id]
+                                    target_elements_involved.add(target_atom.element)
+
+                                neighbor_elements_involved = set()
+                                for neighbor_atom_id in neighbor_atom_ids:
+                                    neighbor_atom = pdb_handler.atom_id_map[neighbor_atom_id]
+                                    neighbor_elements_involved.add(neighbor_atom.element)
+
+                                # Assuming only one target element and one neighbor element involved
+                                if len(target_elements_involved) == 1 and len(neighbor_elements_involved) == 1:
+                                    target_element = next(iter(target_elements_involved))
+                                    neighbor_element = next(iter(neighbor_elements_involved))
+                                else:
+                                    # Handle cases where multiple elements are involved
+                                    target_element = ','.join(sorted(target_elements_involved))
+                                    neighbor_element = ','.join(sorted(neighbor_elements_involved))
+
+                                pattern = (num_targets, target_element, num_neighbors, neighbor_element)
+                                sharing_patterns[pattern] += 1
+
+                    file_progress_bar.update(1)
+                file_progress_bar.close()
+
+                # Store the coordination stats for this subfolder
+                subfolder_coordination_stats[subfolder] = subfolder_stats
+            overall_progress_bar.update(1)
+        overall_progress_bar.close()
+
+        return subfolder_coordination_stats, sharing_patterns
+
     ## -- Cluster Charge Calculation
     def calculate_cluster_charge(self, pdb_handler):
         """
@@ -299,7 +568,7 @@ class ClusterBatchAnalyzer:
         return total_charge
 
     ## -- Volume Calculation Methods -- ##
-    # - Calculate Radius of Gyration for Volume Method
+    # - Volume Method 1: Calculate Radius of Gyration for Volume Method
     def calculate_radius_of_gyration(self, atom_positions, electron_counts):
         """
         Calculate the radius of gyration (Rg) for a cluster of atoms.
@@ -358,7 +627,7 @@ class ClusterBatchAnalyzer:
 
         return volume
     
-    # - Ionic Radius Volume Approximation Method
+    # - Volume Method 2: Ionic Radius Volume Approximation Method
     # Note: Add a method to base the ionic radius dynamically on the coordination for select atoms.
     def build_ionic_radius_lookup(self):
         """
@@ -479,7 +748,7 @@ class ClusterBatchAnalyzer:
         
         return total_volume
     
-    # - Convex Hull Method
+    # - Volume Method 3: Convex Hull Method
     def calculate_cluster_volume(self, pdb_handler):
         all_atoms = pdb_handler.core_atoms + pdb_handler.shell_atoms
         if len(all_atoms) < 4:
@@ -507,7 +776,7 @@ class ClusterBatchAnalyzer:
             hull = ConvexHull(coordinates)
             self.plot_convex_hull(coordinates, hull, cluster_size)
 
-    # - Scattering Cross Section Method
+    # - Volume Method 4: Scattering Cross Section Method
     def obtain_crossections(self, atoms, energy=17000):
         """
         Calculate the coherent scattering cross-sections for each atom in the cluster.
@@ -575,7 +844,7 @@ class ClusterBatchAnalyzer:
 
         return total_cluster_volume
 
-    # - Voronoi Polyhedral Construction Method 
+    # - Volume Method 5: Voronoi Polyhedral Construction Method 
     def fetch_ionic_radius(self, element_symbol):
         """
         Fetch the ionic radius of an element from the Mendeleev library.

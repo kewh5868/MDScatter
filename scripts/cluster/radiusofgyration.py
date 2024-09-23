@@ -3,6 +3,7 @@ import numpy as np
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from scipy.linalg import eigh
+import mendeleev
 from mendeleev import element  # To fetch ionic radii
 
 class RadiusOfGyrationCalculator:
