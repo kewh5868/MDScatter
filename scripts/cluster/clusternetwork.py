@@ -66,26 +66,28 @@ class ClusterNetwork:
     @staticmethod
     def _create_output_folder(output_path, folder_name):
         """
-        Creates an output folder. If the folder exists, appends a timestamp.
+        Creates an output folder. If the folder exists, uses the existing folder without appending a timestamp.
         
         Parameters:
         - output_path (str): Path to the output directory.
         - folder_name (str): Name of the folder to create.
         
         Returns:
-        - full_output_path (str): The full path of the created folder.
+        - full_output_path (str): The full path of the created or existing folder.
+        
+        Raises:
+        - FileExistsError: If the folder exists and you choose to handle it differently.
         """
         full_output_path = os.path.join(output_path, folder_name)
 
-        # If the folder already exists, append timestamp
+        # If the folder already exists, do not append timestamp
         if os.path.exists(full_output_path):
-            timestamp = datetime.now().strftime("_%y%m%d_%H%M%S")
-            folder_name = folder_name + timestamp
-            full_output_path = os.path.join(output_path, folder_name)
-            print(f"Folder already exists. Creating folder with timestamp: {folder_name}")
+            print(f"Folder '{full_output_path}' already exists. Using the existing folder.")
+        else:
+            # Create the directory since it does not exist
+            os.makedirs(full_output_path, exist_ok=True)
+            print(f"Created folder: {full_output_path}")
         
-        # Create the directory
-        os.makedirs(full_output_path, exist_ok=True)
         return full_output_path
 
     def write_individual_cluster_pdb_files(self, pdb_handler, output_path, folder_name):
@@ -96,6 +98,9 @@ class ClusterNetwork:
         - pdb_handler (PDBFileHandler): The PDB file handler containing atom data.
         - output_path (str): The base directory where the PDB files will be saved.
         - folder_name (str): The name of the folder to create in the output directory.
+        
+        Raises:
+        - FileExistsError: If a PDB file to be written already exists in the target folder.
         """
         # Create the output folder
         full_output_path = self._create_output_folder(output_path, folder_name)
@@ -113,11 +118,15 @@ class ClusterNetwork:
 
             # Generate a new file name with the original filename and the network ID
             output_filename = f"{original_filename}_{network_id}.pdb"
-            output_path = os.path.join(full_output_path, output_filename)
+            output_file_path = os.path.join(full_output_path, output_filename)
+
+            # Check if the file already exists
+            if os.path.exists(output_file_path):
+                raise FileExistsError(f"File '{output_file_path}' already exists. Aborting to prevent overwriting.")
 
             # Write the atoms to a new PDB file
-            pdb_handler.write_pdb_file(output_path, atoms=cluster_atoms)
-            print(f"Written PDB file for cluster {network_id} to {output_path}")
+            pdb_handler.write_pdb_file(output_file_path, atoms=cluster_atoms)
+            print(f"Written PDB file for cluster {network_id} to {output_file_path}")
 
     def write_cluster_pdb_files_with_coordinated_shell(self, pdb_handler, output_path, folder_name, target_elements, neighbor_elements, distance_thresholds, shell_residue_names):
         """
@@ -132,6 +141,9 @@ class ClusterNetwork:
         - neighbor_elements (list): The list of neighbor elements to include.
         - distance_thresholds (dict): A dictionary of distance thresholds for atom pairs.
         - shell_residue_names (list): List of shell residue names to include.
+        
+        Raises:
+        - FileExistsError: If a PDB file to be written already exists in the target folder.
         """
         # Create the output folder
         full_output_path = self._create_output_folder(output_path, folder_name)
@@ -160,10 +172,15 @@ class ClusterNetwork:
             atoms_to_write.extend(cluster_atoms)
 
             output_filename = f"{original_filename}_{network_id}.pdb"
-            output_path = os.path.join(full_output_path, output_filename)
+            output_file_path = os.path.join(full_output_path, output_filename)
 
-            pdb_handler.write_pdb_file(output_path, atoms=atoms_to_write)
-            print(f"Written PDB file for cluster {network_id} with coordinated shell residues to {output_path}")
+            # Check if the file already exists
+            if os.path.exists(output_file_path):
+                raise FileExistsError(f"File '{output_file_path}' already exists. Aborting to prevent overwriting.")
+
+            # Write the atoms to a new PDB file
+            pdb_handler.write_pdb_file(output_file_path, atoms=atoms_to_write)
+            print(f"Written PDB file for cluster {network_id} with coordinated shell residues to {output_file_path}")
 
     def rename_clusters_in_pdb(self, pdb_handler, output_path, output_filename):
         """

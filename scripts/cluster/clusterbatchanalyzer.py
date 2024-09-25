@@ -402,6 +402,312 @@ class ClusterBatchAnalyzer:
         # Return the coordination stats, neighbor atom IDs, and counting stats per neighbor atom
         return coordination_stats, neighbor_atom_ids, counting_stats
 
+    # def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
+    #     """
+    #     Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
+    #     track how many times each neighbor atom was counted in each PDB file, and identify sharing patterns.
+
+    #     Parameters:
+    #     - sorted_pdb_folder (str, optional): Path to the sorted PDB folder. If not provided,
+    #     the method will use the class attribute `self.sorted_pdb_folder`.
+    #     - target_elements (list, required): List of target elements to calculate coordination for.
+    #     - neighbor_elements (list, required): List of neighbor elements to calculate coordination with.
+    #     - distance_thresholds (dict, required): Dictionary with distance thresholds for each atom pair (e.g., {('Pb', 'I'): 3.6}).
+
+    #     Returns:
+    #     - subfolder_coordination_stats (dict): Dictionary with subfolder names as keys and coordination stats as values.
+    #     - sharing_patterns (dict): Dictionary containing counts of sharing patterns across all PDB files.
+    #     """
+    #     if target_elements is None or neighbor_elements is None or distance_thresholds is None:
+    #         raise ValueError("target_elements, neighbor_elements, and distance_thresholds must all be provided.")
+
+    #     if sorted_pdb_folder:
+    #         self.sorted_pdb_folder = sorted_pdb_folder
+    #     elif not hasattr(self, 'sorted_pdb_folder') or not os.path.exists(self.sorted_pdb_folder):
+    #         raise ValueError("Sorted PDB folder not found. Please run sort_pdb_files_by_node_count first or provide a sorted path.")
+
+    #     subfolder_coordination_stats = {}
+    #     self.cluster_coordination_stats = {}  # Initialize or reset the attribute
+    #     self.coordination_details = defaultdict(list)
+    #     self.per_file_neighbor_counts = defaultdict(dict)  # Store per-PDB-file neighbor counts
+    #     self.per_folder_multiplicity_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # Per-folder counts
+    #     self.overall_multiplicity_counts = defaultdict(lambda: defaultdict(int))  # Overall counts across all folders
+    #     sharing_patterns = defaultdict(int)  # Counts of sharing patterns across all PDB files
+
+    #     subfolders = os.listdir(self.sorted_pdb_folder)
+    #     overall_progress_bar = tqdm(total=len(subfolders), desc="Processing subfolders", ncols=100)
+
+    #     for subfolder in subfolders:
+    #         subfolder_path = os.path.join(self.sorted_pdb_folder, subfolder)
+    #         if os.path.isdir(subfolder_path):
+    #             pdb_files = [os.path.join(subfolder_path, f) for f in os.listdir(subfolder_path) if f.endswith('.pdb')]
+    #             subfolder_stats = defaultdict(list)
+    #             cluster_stats = defaultdict(list)  # Collect coordination numbers for this cluster size
+
+    #             # Removed file progress bar
+    #             # file_progress_bar = tqdm(total=len(pdb_files), desc=f"Processing files in {subfolder}", ncols=100)
+
+    #             for pdb_file in pdb_files:
+    #                 pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names,
+    #                                             shell_residue_names=self.shell_residue_names)
+
+    #                 # Create a mapping from atom IDs to atom objects
+    #                 pdb_handler.atom_id_map = {}
+    #                 for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
+    #                     pdb_handler.atom_id_map[atom.atom_id] = atom
+
+    #                 target_atoms = [atom for atom in pdb_handler.core_atoms if atom.element in target_elements]
+
+    #                 if target_atoms:
+    #                     file_neighbor_counts = defaultdict(lambda: {'count': 0, 'element': None})
+    #                     neighbor_to_targets = defaultdict(set)  # Mapping from neighbor atom ID to set of target atom IDs
+    #                     target_to_neighbors = defaultdict(set)  # Mapping from target atom ID to set of neighbor atom IDs
+
+    #                     for target_atom in target_atoms:
+    #                         coordination_stats, neighbor_atom_ids, counting_stats = self.calculate_coordination_numbers_for_atom(
+    #                             pdb_handler, target_atom, neighbor_elements, distance_thresholds
+    #                         )
+
+    #                         for pair, (coordination_number, _) in coordination_stats.items():
+    #                             subfolder_stats[pair].append(coordination_number)
+    #                             # Collect coordination numbers for cluster stats
+    #                             cluster_stats[pair].append(coordination_number)
+
+    #                         # Update mappings
+    #                         target_to_neighbors[target_atom.atom_id] = neighbor_atom_ids
+    #                         for neighbor_atom_id in neighbor_atom_ids:
+    #                             neighbor_to_targets[neighbor_atom_id].add(target_atom.atom_id)
+
+    #                         # Update file_neighbor_counts with counts from this target atom
+    #                         for neighbor_atom_id, stats in counting_stats.items():
+    #                             file_neighbor_counts[neighbor_atom_id]['count'] += stats['count']
+    #                             file_neighbor_counts[neighbor_atom_id]['element'] = stats['element']
+
+    #                         self.coordination_details[pdb_file].append({
+    #                             'target_atom_id': target_atom.atom_id,
+    #                             'target_atom_element': target_atom.element,
+    #                             'coordination_stats': coordination_stats,
+    #                             'neighbor_atom_ids': neighbor_atom_ids,
+    #                             'counting_stats': counting_stats
+    #                         })
+
+    #                     # After processing all target atoms, store the per-PDB-file neighbor counts
+    #                     self.per_file_neighbor_counts[pdb_file] = file_neighbor_counts
+
+    #                     # Aggregate counts per neighbor element and multiplicity for the current PDB file
+    #                     for neighbor_atom_id, stats in file_neighbor_counts.items():
+    #                         element = stats['element']
+    #                         multiplicity = stats['count']
+    #                         # Update per-folder counts
+    #                         self.per_folder_multiplicity_counts[subfolder][element][multiplicity] += 1
+    #                         # Update overall counts
+    #                         self.overall_multiplicity_counts[element][multiplicity] += 1
+
+    #                     # Identify sharing patterns
+    #                     # Group neighbor atoms by the set of target atoms they are coordinated with
+    #                     neighbor_groups = defaultdict(list)
+    #                     for neighbor_atom_id, target_atom_ids_set in neighbor_to_targets.items():
+    #                         key = frozenset(target_atom_ids_set)
+    #                         neighbor_groups[key].append(neighbor_atom_id)
+
+    #                     for target_atom_ids_set, neighbor_atom_ids in neighbor_groups.items():
+    #                         num_targets = len(target_atom_ids_set)
+    #                         num_neighbors = len(neighbor_atom_ids)
+
+    #                         # Include patterns with num_targets >= 1 if needed
+    #                         # if num_targets >= 1:
+    #                         # In your previous requests, you wanted to exclude patterns with only one target atom sharing
+    #                         # If you want to include them, adjust the condition accordingly
+    #                         if num_targets > 0:
+    #                             # Get the element names
+    #                             target_elements_involved = set()
+    #                             for target_atom_id in target_atom_ids_set:
+    #                                 target_atom = pdb_handler.atom_id_map[target_atom_id]
+    #                                 target_elements_involved.add(target_atom.element)
+
+    #                             neighbor_elements_involved = set()
+    #                             for neighbor_atom_id in neighbor_atom_ids:
+    #                                 neighbor_atom = pdb_handler.atom_id_map[neighbor_atom_id]
+    #                                 neighbor_elements_involved.add(neighbor_atom.element)
+
+    #                             # Assuming only one target element and one neighbor element involved
+    #                             if len(target_elements_involved) == 1 and len(neighbor_elements_involved) == 1:
+    #                                 target_element = next(iter(target_elements_involved))
+    #                                 neighbor_element = next(iter(neighbor_elements_involved))
+    #                             else:
+    #                                 # Handle cases where multiple elements are involved
+    #                                 target_element = ','.join(sorted(target_elements_involved))
+    #                                 neighbor_element = ','.join(sorted(neighbor_elements_involved))
+
+    #                             pattern = (num_targets, target_element, num_neighbors, neighbor_element)
+    #                             sharing_patterns[pattern] += 1
+
+    #                 # Removed file progress bar update
+    #                 # file_progress_bar.update(1)
+    #             # Removed file progress bar close
+    #             # file_progress_bar.close()
+
+    #             # Store the coordination stats for this subfolder
+    #             subfolder_coordination_stats[subfolder] = subfolder_stats
+    #             self.cluster_coordination_stats[subfolder] = cluster_stats  # Store cluster stats
+    #         overall_progress_bar.update(1)
+    #     overall_progress_bar.close()
+
+    #     return subfolder_coordination_stats, sharing_patterns
+
+    # def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
+    #     """
+    #     Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
+    #     track how many times each neighbor atom was counted in each PDB file, and identify sharing patterns.
+
+    #     Parameters:
+    #     - sorted_pdb_folder (str, optional): Path to the sorted PDB folder. If not provided,
+    #     the method will use the class attribute `self.sorted_pdb_folder`.
+    #     - target_elements (list, required): List of target elements to calculate coordination for.
+    #     - neighbor_elements (list, required): List of neighbor elements to calculate coordination with.
+    #     - distance_thresholds (dict, required): Dictionary with distance thresholds for each atom pair (e.g., {('Pb', 'I'): 3.6}).
+
+    #     Returns:
+    #     - subfolder_coordination_stats (dict): Dictionary with subfolder names as keys and coordination stats as values.
+    #     - sharing_patterns (dict): Dictionary containing counts of sharing patterns across all PDB files.
+    #     """
+    #     if target_elements is None or neighbor_elements is None or distance_thresholds is None:
+    #         raise ValueError("target_elements, neighbor_elements, and distance_thresholds must all be provided.")
+
+    #     if sorted_pdb_folder:
+    #         self.sorted_pdb_folder = sorted_pdb_folder
+    #     elif not hasattr(self, 'sorted_pdb_folder') or not os.path.exists(self.sorted_pdb_folder):
+    #         raise ValueError("Sorted PDB folder not found. Please run sort_pdb_files_by_node_count first or provide a sorted path.")
+
+    #     subfolder_coordination_stats = {}
+    #     self.cluster_coordination_stats = {}  # Initialize or reset the attribute
+    #     self.coordination_details = defaultdict(list)
+    #     self.per_file_neighbor_counts = defaultdict(dict)  # Store per-PDB-file neighbor counts
+    #     self.per_folder_multiplicity_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # Per-folder counts
+    #     self.overall_multiplicity_counts = defaultdict(lambda: defaultdict(int))  # Overall counts across all folders
+    #     sharing_patterns = defaultdict(int)  # Counts of sharing patterns across all PDB files
+
+    #     subfolders = os.listdir(self.sorted_pdb_folder)
+    #     overall_progress_bar = tqdm(total=len(subfolders), desc="Processing subfolders", ncols=100)
+
+    #     for subfolder in subfolders:
+    #         subfolder_path = os.path.join(self.sorted_pdb_folder, subfolder)
+    #         if os.path.isdir(subfolder_path):
+    #             pdb_files = [os.path.join(subfolder_path, f) for f in os.listdir(subfolder_path) if f.endswith('.pdb')]
+    #             subfolder_stats = defaultdict(list)
+    #             cluster_stats = defaultdict(list)  # Collect coordination numbers for this cluster size
+
+    #             # Removed file progress bar
+    #             # file_progress_bar = tqdm(total=len(pdb_files), desc=f"Processing files in {subfolder}", ncols=100)
+
+    #             for pdb_file in pdb_files:
+    #                 pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names,
+    #                                             shell_residue_names=self.shell_residue_names)
+
+    #                 # Create a mapping from atom IDs to atom objects
+    #                 pdb_handler.atom_id_map = {}
+    #                 for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
+    #                     pdb_handler.atom_id_map[atom.atom_id] = atom
+
+    #                 target_atoms = [atom for atom in pdb_handler.core_atoms if atom.element in target_elements]
+
+    #                 if target_atoms:
+    #                     file_neighbor_counts = defaultdict(lambda: {'count': 0, 'element': None})
+    #                     neighbor_to_targets = defaultdict(set)  # Mapping from neighbor atom ID to set of target atom IDs
+    #                     target_to_neighbors = defaultdict(set)  # Mapping from target atom ID to set of neighbor atom IDs
+
+    #                     for target_atom in target_atoms:
+    #                         coordination_stats, neighbor_atom_ids, counting_stats = self.calculate_coordination_numbers_for_atom(
+    #                             pdb_handler, target_atom, neighbor_elements, distance_thresholds
+    #                         )
+
+    #                         for pair, (coordination_number, _) in coordination_stats.items():
+    #                             subfolder_stats[pair].append(coordination_number)
+    #                             # Collect coordination numbers for cluster stats
+    #                             cluster_stats[pair].append(coordination_number)
+
+    #                         # Update mappings
+    #                         target_to_neighbors[target_atom.atom_id] = neighbor_atom_ids
+    #                         for neighbor_atom_id in neighbor_atom_ids:
+    #                             neighbor_to_targets[neighbor_atom_id].add(target_atom.atom_id)
+
+    #                         # Update file_neighbor_counts with counts from this target atom
+    #                         for neighbor_atom_id, stats in counting_stats.items():
+    #                             file_neighbor_counts[neighbor_atom_id]['count'] += stats['count']
+    #                             file_neighbor_counts[neighbor_atom_id]['element'] = stats['element']
+
+    #                         self.coordination_details[pdb_file].append({
+    #                             'target_atom_id': target_atom.atom_id,
+    #                             'target_atom_element': target_atom.element,
+    #                             'coordination_stats': coordination_stats,
+    #                             'neighbor_atom_ids': neighbor_atom_ids,
+    #                             'counting_stats': counting_stats
+    #                         })
+
+    #                     # After processing all target atoms, store the per-PDB-file neighbor counts
+    #                     self.per_file_neighbor_counts[pdb_file] = file_neighbor_counts
+
+    #                     # Aggregate counts per neighbor element and multiplicity for the current PDB file
+    #                     for neighbor_atom_id, stats in file_neighbor_counts.items():
+    #                         element = stats['element']
+    #                         multiplicity = stats['count']
+    #                         # Update per-folder counts
+    #                         self.per_folder_multiplicity_counts[subfolder][element][multiplicity] += 1
+    #                         # Update overall counts
+    #                         self.overall_multiplicity_counts[element][multiplicity] += 1
+
+    #                     # Identify sharing patterns
+    #                     # Group neighbor atoms by the set of target atoms they are coordinated with
+    #                     neighbor_groups = defaultdict(list)
+    #                     for neighbor_atom_id, target_atom_ids_set in neighbor_to_targets.items():
+    #                         key = frozenset(target_atom_ids_set)
+    #                         neighbor_groups[key].append(neighbor_atom_id)
+
+    #                     for target_atom_ids_set, neighbor_atom_ids in neighbor_groups.items():
+    #                         num_targets = len(target_atom_ids_set)
+    #                         num_neighbors = len(neighbor_atom_ids)
+
+    #                         # Include patterns with num_targets >= 1 if needed
+    #                         # if num_targets >= 1:
+    #                         # In your previous requests, you wanted to exclude patterns with only one target atom sharing
+    #                         # If you want to include them, adjust the condition accordingly
+    #                         if num_targets > 0:
+    #                             # Get the element names
+    #                             target_elements_involved = set()
+    #                             for target_atom_id in target_atom_ids_set:
+    #                                 target_atom = pdb_handler.atom_id_map[target_atom_id]
+    #                                 target_elements_involved.add(target_atom.element)
+
+    #                             neighbor_elements_involved = set()
+    #                             for neighbor_atom_id in neighbor_atom_ids:
+    #                                 neighbor_atom = pdb_handler.atom_id_map[neighbor_atom_id]
+    #                                 neighbor_elements_involved.add(neighbor_atom.element)
+
+    #                             # Assuming only one target element and one neighbor element involved
+    #                             if len(target_elements_involved) == 1 and len(neighbor_elements_involved) == 1:
+    #                                 target_element = next(iter(target_elements_involved))
+    #                                 neighbor_element = next(iter(neighbor_elements_involved))
+    #                             else:
+    #                                 # Handle cases where multiple elements are involved
+    #                                 target_element = ','.join(sorted(target_elements_involved))
+    #                                 neighbor_element = ','.join(sorted(neighbor_elements_involved))
+
+    #                             pattern = (num_targets, target_element, num_neighbors, neighbor_element)
+    #                             sharing_patterns[pattern] += 1
+
+    #                 # Removed file progress bar update
+    #                 # file_progress_bar.update(1)
+    #             # Removed file progress bar close
+    #             # file_progress_bar.close()
+
+    #             # Store the coordination stats for this subfolder
+    #             subfolder_coordination_stats[subfolder] = subfolder_stats
+    #             self.cluster_coordination_stats[subfolder] = cluster_stats  # Store cluster stats
+    #         overall_progress_bar.update(1)
+    #     overall_progress_bar.close()
+
+    #     return subfolder_coordination_stats, sharing_patterns
+
     def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
         """
         Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
@@ -426,6 +732,10 @@ class ClusterBatchAnalyzer:
         elif not hasattr(self, 'sorted_pdb_folder') or not os.path.exists(self.sorted_pdb_folder):
             raise ValueError("Sorted PDB folder not found. Please run sort_pdb_files_by_node_count first or provide a sorted path.")
 
+        from collections import defaultdict
+        import os
+        from tqdm import tqdm
+
         subfolder_coordination_stats = {}
         self.cluster_coordination_stats = {}  # Initialize or reset the attribute
         self.coordination_details = defaultdict(list)
@@ -433,6 +743,7 @@ class ClusterBatchAnalyzer:
         self.per_folder_multiplicity_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # Per-folder counts
         self.overall_multiplicity_counts = defaultdict(lambda: defaultdict(int))  # Overall counts across all folders
         sharing_patterns = defaultdict(int)  # Counts of sharing patterns across all PDB files
+        self.sharing_pattern_instances = []  # Initialize or reset the attribute to store instance details
 
         subfolders = os.listdir(self.sorted_pdb_folder)
         overall_progress_bar = tqdm(total=len(subfolders), desc="Processing subfolders", ncols=100)
@@ -443,9 +754,6 @@ class ClusterBatchAnalyzer:
                 pdb_files = [os.path.join(subfolder_path, f) for f in os.listdir(subfolder_path) if f.endswith('.pdb')]
                 subfolder_stats = defaultdict(list)
                 cluster_stats = defaultdict(list)  # Collect coordination numbers for this cluster size
-
-                # Removed file progress bar
-                # file_progress_bar = tqdm(total=len(pdb_files), desc=f"Processing files in {subfolder}", ncols=100)
 
                 for pdb_file in pdb_files:
                     pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names,
@@ -514,10 +822,6 @@ class ClusterBatchAnalyzer:
                             num_targets = len(target_atom_ids_set)
                             num_neighbors = len(neighbor_atom_ids)
 
-                            # Include patterns with num_targets >= 1 if needed
-                            # if num_targets >= 1:
-                            # In your previous requests, you wanted to exclude patterns with only one target atom sharing
-                            # If you want to include them, adjust the condition accordingly
                             if num_targets > 0:
                                 # Get the element names
                                 target_elements_involved = set()
@@ -542,14 +846,23 @@ class ClusterBatchAnalyzer:
                                 pattern = (num_targets, target_element, num_neighbors, neighbor_element)
                                 sharing_patterns[pattern] += 1
 
-                    # Removed file progress bar update
-                    # file_progress_bar.update(1)
-                # Removed file progress bar close
-                # file_progress_bar.close()
+                                # Record instance details
+                                instance = {
+                                    'num_targets': num_targets,
+                                    'target_atom_ids': list(target_atom_ids_set),
+                                    'num_neighbors': num_neighbors,
+                                    'neighbor_atom_ids': neighbor_atom_ids,
+                                    'target_element': target_element,
+                                    'neighbor_element': neighbor_element,
+                                    'pattern': pattern,
+                                    'pdb_file': pdb_file  # Optional: Include the source PDB file
+                                }
+                                self.sharing_pattern_instances.append(instance)
 
                 # Store the coordination stats for this subfolder
                 subfolder_coordination_stats[subfolder] = subfolder_stats
                 self.cluster_coordination_stats[subfolder] = cluster_stats  # Store cluster stats
+
             overall_progress_bar.update(1)
         overall_progress_bar.close()
 
@@ -2047,3 +2360,381 @@ class ClusterBatchAnalyzer:
 
         plt.tight_layout()
         plt.show()
+
+    # Plotting Sharing Pattern Distributions
+    def plot_sharing_pattern_distribution(self, neighbor_atom):
+        """
+        Plots a histogram where the x-axis represents specific sharing patterns between target atoms
+        and the specified neighbor atom. The y-axis represents the counts of target atoms that exhibit
+        each sharing pattern.
+
+        Parameters:
+        - neighbor_atom (str): The neighbor atom type to focus on (e.g., 'I').
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from collections import defaultdict
+
+        # Ensure coordination details are available
+        if not hasattr(self, 'coordination_details'):
+            print("Coordination details not found. Please run the coordination calculations first.")
+            return
+
+        # Data structures to hold sharing information
+        neighbor_to_targets = defaultdict(set)  # Maps neighbor atom IDs to sets of connected target atom IDs
+        target_elements_set = set()  # To collect target elements for dynamic labeling
+
+        # Iterate over the coordination details
+        for pdb_file, target_atom_data_list in self.coordination_details.items():
+            for target_atom_data in target_atom_data_list:
+                target_atom_id = target_atom_data['target_atom_id']
+                target_atom_element = target_atom_data['target_atom_element']
+                neighbor_atom_ids = target_atom_data['neighbor_atom_ids']
+                counting_stats = target_atom_data['counting_stats']
+
+                # Add target atom element to the set for labeling
+                target_elements_set.add(target_atom_element)
+
+                for neighbor_atom_id in neighbor_atom_ids:
+                    # Get the neighbor atom's element from counting_stats
+                    neighbor_info = counting_stats[neighbor_atom_id]
+                    neighbor_element = neighbor_info['element']
+
+                    if neighbor_element != neighbor_atom:
+                        continue  # Skip neighbor atoms not of the specified type
+
+                    # Add the target atom to the set of connected targets for this neighbor
+                    neighbor_to_targets[neighbor_atom_id].add(target_atom_id)
+
+        # Now, analyze the sharing patterns
+        sharing_patterns = defaultdict(lambda: defaultdict(set))  # sharing_patterns[num_targets][neighbor_id] = set of target_atom_ids
+
+        # Collect the sharing patterns
+        for neighbor_id, target_set in neighbor_to_targets.items():
+            num_targets = len(target_set)
+            # Record the neighbor atoms grouped by the number of target atoms they are shared with
+            sharing_patterns[num_targets][neighbor_id] = target_set
+
+        # Now, create combinations of num_targets and num_shared_neighbors
+        pattern_counts = {}  # Key: (num_targets, num_shared_neighbors), Value: number of target atoms involved
+
+        for num_targets, neighbor_dict in sharing_patterns.items():
+            num_shared_neighbors = len(neighbor_dict)
+            pattern = (num_targets, num_shared_neighbors)
+
+            # Collect all target atoms involved in this pattern
+            target_atoms_in_pattern = set()
+            for neighbor_id, target_set in neighbor_dict.items():
+                target_atoms_in_pattern.update(target_set)
+
+            num_target_atoms = len(target_atoms_in_pattern)
+
+            pattern_counts[pattern] = num_target_atoms
+
+        # Prepare data for plotting
+        patterns = list(pattern_counts.keys())
+        counts = [pattern_counts[pattern] for pattern in patterns]
+
+        # Sort patterns for consistent plotting
+        patterns_sorted = sorted(patterns, key=lambda x: (x[0], x[1]))
+        counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
+
+        # Create x-axis labels
+        x_labels = [f"{tgt}_{shr}" for tgt, shr in patterns_sorted]
+
+        # Prepare dynamic axis labels
+        target_elements_str = ', '.join(sorted(target_elements_set))
+
+        # Plotting
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        x_positions = np.arange(len(x_labels))
+        ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
+
+        # Set x-axis labels with subscripts
+        x_tick_labels = [f"{tgt}$_{{{shr}}}$" for tgt, shr in patterns_sorted]
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(x_tick_labels, fontsize=12)
+
+        # Set labels and title
+        ax.set_xlabel(f"Number of {target_elements_str} Atoms Sharing {neighbor_atom} Neighbors", fontsize=14)
+        ax.set_ylabel(f"Number of {target_elements_str} Atoms", fontsize=14)
+        ax.set_title(f"Sharing Patterns of {neighbor_atom} Neighbors among {target_elements_str} Atoms", fontsize=16)
+
+        # Show grid
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+        plt.tight_layout()
+        plt.show()
+
+    # def plot_sharing_pattern_histogram(self, sharing_patterns, neighbor_atom):
+    #     """
+    #     Plots a histogram where the x-axis represents specific sharing patterns between target atoms
+    #     and the specified neighbor atom. The y-axis represents the counts of target atoms that exhibit
+    #     each sharing pattern.
+
+    #     Parameters:
+    #     - sharing_patterns (dict): The sharing patterns data.
+    #     - neighbor_atom (str): The neighbor atom type to focus on (e.g., 'I').
+    #     """
+    #     import matplotlib.pyplot as plt
+    #     import numpy as np
+    #     from collections import defaultdict
+
+    #     # Data structures
+    #     neighbor_to_targets = defaultdict(set)  # Maps neighbor atom IDs to sets of connected target atom IDs
+    #     target_to_neighbors = defaultdict(set)  # Maps target atom IDs to sets of connected neighbor atom IDs
+    #     target_elements_set = set()  # To collect target elements for dynamic labeling
+
+    #     # Iterate over the coordination details
+    #     for pdb_file, target_atom_data_list in self.coordination_details.items():
+    #         for target_atom_data in target_atom_data_list:
+    #             target_atom_id = target_atom_data['target_atom_id']
+    #             target_atom_element = target_atom_data['target_atom_element']
+    #             neighbor_atom_ids = target_atom_data['neighbor_atom_ids']
+    #             counting_stats = target_atom_data['counting_stats']
+
+    #             target_elements_set.add(target_atom_element)
+
+    #             # Filter neighbor atoms of the specified type
+    #             neighbor_atom_ids_of_type = set()
+    #             for neighbor_atom_id in neighbor_atom_ids:
+    #                 neighbor_info = counting_stats[neighbor_atom_id]
+    #                 neighbor_element = neighbor_info['element']
+    #                 if neighbor_element == neighbor_atom:
+    #                     neighbor_atom_ids_of_type.add(neighbor_atom_id)
+    #                     neighbor_to_targets[neighbor_atom_id].add(target_atom_id)
+
+    #             if neighbor_atom_ids_of_type:
+    #                 target_to_neighbors[target_atom_id].update(neighbor_atom_ids_of_type)
+    #             # Else, the target atom has no neighbors of the specified type and is excluded
+
+    #     # Now, identify shared and non-shared neighbor atoms
+    #     shared_neighbors = {neighbor_id for neighbor_id, targets in neighbor_to_targets.items() if len(targets) > 1}
+    #     non_shared_neighbors = {neighbor_id for neighbor_id, targets in neighbor_to_targets.items() if len(targets) == 1}
+
+    #     # Categorize target atoms
+    #     pattern_counts = defaultdict(int)  # Key: (num_targets, num_neighbors), Value: count of target atoms
+
+    #     # For target atoms
+    #     for target_atom_id, neighbor_ids in target_to_neighbors.items():
+    #         # Separate shared and non-shared neighbor atoms
+    #         shared_neighbor_ids = neighbor_ids & shared_neighbors
+    #         non_shared_neighbor_ids = neighbor_ids & non_shared_neighbors
+
+    #         if shared_neighbor_ids:
+    #             # Target atom is involved in sharing
+    #             # Collect sharing patterns based on the groups of target atoms sharing neighbors
+    #             # For simplicity, we will consider each shared neighbor separately
+    #             # Note: This may result in multiple counts per target atom if it shares multiple neighbors differently
+    #             for neighbor_id in shared_neighbor_ids:
+    #                 targets_sharing = neighbor_to_targets[neighbor_id]
+    #                 num_targets = len(targets_sharing)
+    #                 num_neighbors = 1  # Since we're considering one shared neighbor at a time
+    #                 key = (num_targets, num_neighbors)
+    #                 pattern_counts[key] += 1  # Count the target atom
+    #         elif non_shared_neighbor_ids:
+    #             # Target atom has neighbor atoms but does not share any of them
+    #             key = (1, 0)
+    #             pattern_counts[key] += 1  # Count the target atom
+
+    #     # Prepare data for plotting
+    #     patterns = list(pattern_counts.keys())
+    #     counts = [pattern_counts[pattern] for pattern in patterns]
+
+    #     # Sort patterns for consistent plotting
+    #     patterns_sorted = sorted(patterns, key=lambda x: (x[0], x[1]))
+    #     counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
+
+    #     # Create x-axis labels
+    #     x_labels = [f"{tgt}$_{{{shr}}}$" for tgt, shr in patterns_sorted]
+
+    #     # Prepare dynamic axis labels
+    #     target_elements_str = ', '.join(sorted(target_elements_set))
+
+    #     # Plotting
+    #     fig, ax = plt.subplots(figsize=(12, 8))
+
+    #     x_positions = np.arange(len(x_labels))
+    #     ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
+
+    #     ax.set_xticks(x_positions)
+    #     ax.set_xticklabels(x_labels, fontsize=12)
+
+    #     # Set labels and title
+    #     ax.set_xlabel(f"Number of {target_elements_str} Atoms Sharing {neighbor_atom} Neighbors", fontsize=14)
+    #     ax.set_ylabel(f"Number of {target_elements_str} Atoms", fontsize=14)
+    #     ax.set_title(f"Sharing Patterns of {neighbor_atom} Neighbors among {target_elements_str} Atoms", fontsize=16)
+
+    #     # Show grid
+    #     ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+    #     plt.tight_layout()
+    #     plt.show()
+
+    # def plot_sharing_pattern_histogram(self, sharing_patterns, neighbor_atom):
+    #     """
+    #     Plots a histogram where the x-axis represents specific sharing patterns between target atoms
+    #     and the specified neighbor atom. The y-axis represents the number of instances of each sharing pattern.
+
+    #     Parameters:
+    #     - sharing_patterns (dict): The sharing patterns data.
+    #     - neighbor_atom (str): The neighbor atom type to focus on (e.g., 'I').
+    #     """
+    #     import matplotlib.pyplot as plt
+    #     import numpy as np
+    #     from collections import defaultdict
+
+    #     # Data structures
+    #     pattern_counts = defaultdict(int)  # Key: 'N_M', Value: count of instances
+    #     target_elements_set = set()  # To collect target elements for dynamic labeling
+
+    #     total_instances_num_targets_eq_1 = 0  # To sum counts where num_targets == 1
+
+    #     # Process sharing_patterns
+    #     for pattern, count in sharing_patterns.items():
+    #         num_targets, target_element, num_neighbors, neighbor_element = pattern
+
+    #         if neighbor_element != neighbor_atom:
+    #             continue  # Skip patterns not involving the specified neighbor atom
+
+    #         # Collect target elements for dynamic labeling
+    #         target_elements_set.add(target_element)
+
+    #         if num_targets == 1:
+    #             # Sum all instances where num_targets == 1, regardless of num_neighbors
+    #             total_instances_num_targets_eq_1 += count
+    #         else:
+    #             # Create the 'N_M' label
+    #             key = f"{num_targets}_{num_neighbors}"
+    #             pattern_counts[key] += count
+
+    #     # Add the aggregated instances for num_targets == 1 under '1_0'
+    #     if total_instances_num_targets_eq_1 > 0:
+    #         pattern_counts['1_0'] = total_instances_num_targets_eq_1
+
+    #     # Prepare data for plotting
+    #     patterns = list(pattern_counts.keys())
+    #     counts = [pattern_counts[pattern] for pattern in patterns]
+
+    #     # Sort patterns for consistent plotting
+    #     def sort_key(label):
+    #         num_targets, num_neighbors = map(int, label.split('_'))
+    #         return (num_targets, num_neighbors)
+
+    #     patterns_sorted = sorted(patterns, key=sort_key)
+    #     counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
+
+    #     # Create x-axis labels with subscripts
+    #     x_labels = [label.replace('_', '$_{') + '}$' for label in patterns_sorted]
+
+    #     # Prepare dynamic axis labels
+    #     target_elements_str = ', '.join(sorted(target_elements_set))
+
+    #     # Debug: Print the patterns being assigned
+    #     print("\nAssigned Sharing Patterns:")
+    #     for key in patterns_sorted:
+    #         num_targets, num_neighbors = key.split('_')
+    #         num_targets = int(num_targets)
+    #         num_neighbors = int(num_neighbors)
+    #         print(f"Pattern {num_targets}_{num_neighbors}: {pattern_counts[key]} instance(s)")
+
+    #     # Plotting
+    #     fig, ax = plt.subplots(figsize=(12, 8))
+
+    #     x_positions = np.arange(len(x_labels))
+    #     ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
+
+    #     ax.set_xticks(x_positions)
+    #     ax.set_xticklabels(x_labels, fontsize=12)
+
+    #     # Set labels and title
+    #     ax.set_xlabel(f"Sharing Patterns (Number of {target_elements_str} Atoms Sharing {neighbor_atom} Atoms)", fontsize=14)
+    #     ax.set_ylabel("Number of Instances", fontsize=14)
+    #     ax.set_title(f"Sharing Patterns of {neighbor_atom} Atoms among {target_elements_str} Atoms", fontsize=16)
+
+    #     # Show grid
+    #     ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+    #     plt.tight_layout()
+    #     plt.show()
+
+    def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb'):
+        """
+        Plots a histogram where the x-axis represents specific sharing patterns between target atoms
+        and neighbor atoms. The y-axis represents the number of instances of each sharing pattern.
+        
+        Parameters:
+        - sharing_patterns (dict): The sharing patterns data.
+        - target_atom (str): The target atom type to focus on (e.g., 'Pb').
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+        from collections import defaultdict
+
+        # Data structures
+        pattern_counts = defaultdict(int)  # Key: 'N_M', Value: count of instances
+        total_instances_num_targets_eq_1 = 0  # To sum counts where num_targets == 1
+
+        # Process sharing_patterns
+        for pattern, count in sharing_patterns.items():
+            num_targets, target_element, num_neighbors, neighbor_element = pattern
+
+            if target_element != target_atom:
+                continue  # Skip patterns not involving the specified target atom
+
+            if num_targets == 1:
+                # Sum all instances where num_targets == 1 under '1_0'
+                total_instances_num_targets_eq_1 += count
+            else:
+                # Create the 'N_M' label
+                key = f"{num_targets}_{num_neighbors}"
+                pattern_counts[key] += count
+
+        # Add the aggregated instances for num_targets == 1 under '1_0'
+        if total_instances_num_targets_eq_1 > 0:
+            pattern_counts['1_0'] = total_instances_num_targets_eq_1
+
+        # Prepare data for plotting
+        patterns = list(pattern_counts.keys())
+        counts = [pattern_counts[pattern] for pattern in patterns]
+
+        # Sort patterns for consistent plotting
+        def sort_key(label):
+            num_targets, num_neighbors = map(int, label.split('_'))
+            return (num_targets, num_neighbors)
+
+        patterns_sorted = sorted(patterns, key=sort_key)
+        counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
+
+        # Create x-axis labels with subscripts
+        x_labels = [label.replace('_', '$_{') + '}$' for label in patterns_sorted]
+
+        # Debug: Print the patterns being assigned
+        print("\nAssigned Sharing Patterns:")
+        for key in patterns_sorted:
+            num_targets, num_neighbors = key.split('_')
+            num_targets = int(num_targets)
+            num_neighbors = int(num_neighbors)
+            print(f"Pattern {num_targets}_{num_neighbors}: {pattern_counts[key]} instance(s)")
+
+        # Plotting
+        fig, ax = plt.subplots(figsize=(12, 8))
+
+        x_positions = np.arange(len(x_labels))
+        ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
+
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(x_labels, fontsize=12)
+
+        # Set labels and title
+        ax.set_xlabel(f"Sharing Patterns (Number of {target_atom} Atoms Sharing Neighbor Atoms)", fontsize=14)
+        ax.set_ylabel("Number of Instances", fontsize=14)
+        ax.set_title(f"Sharing Patterns of Neighbor Atoms among {target_atom} Atoms", fontsize=16)
+
+        # Show grid
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+        plt.tight_layout()
+        plt.show()
+
