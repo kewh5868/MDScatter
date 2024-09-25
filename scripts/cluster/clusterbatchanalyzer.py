@@ -402,312 +402,6 @@ class ClusterBatchAnalyzer:
         # Return the coordination stats, neighbor atom IDs, and counting stats per neighbor atom
         return coordination_stats, neighbor_atom_ids, counting_stats
 
-    # def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
-    #     """
-    #     Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
-    #     track how many times each neighbor atom was counted in each PDB file, and identify sharing patterns.
-
-    #     Parameters:
-    #     - sorted_pdb_folder (str, optional): Path to the sorted PDB folder. If not provided,
-    #     the method will use the class attribute `self.sorted_pdb_folder`.
-    #     - target_elements (list, required): List of target elements to calculate coordination for.
-    #     - neighbor_elements (list, required): List of neighbor elements to calculate coordination with.
-    #     - distance_thresholds (dict, required): Dictionary with distance thresholds for each atom pair (e.g., {('Pb', 'I'): 3.6}).
-
-    #     Returns:
-    #     - subfolder_coordination_stats (dict): Dictionary with subfolder names as keys and coordination stats as values.
-    #     - sharing_patterns (dict): Dictionary containing counts of sharing patterns across all PDB files.
-    #     """
-    #     if target_elements is None or neighbor_elements is None or distance_thresholds is None:
-    #         raise ValueError("target_elements, neighbor_elements, and distance_thresholds must all be provided.")
-
-    #     if sorted_pdb_folder:
-    #         self.sorted_pdb_folder = sorted_pdb_folder
-    #     elif not hasattr(self, 'sorted_pdb_folder') or not os.path.exists(self.sorted_pdb_folder):
-    #         raise ValueError("Sorted PDB folder not found. Please run sort_pdb_files_by_node_count first or provide a sorted path.")
-
-    #     subfolder_coordination_stats = {}
-    #     self.cluster_coordination_stats = {}  # Initialize or reset the attribute
-    #     self.coordination_details = defaultdict(list)
-    #     self.per_file_neighbor_counts = defaultdict(dict)  # Store per-PDB-file neighbor counts
-    #     self.per_folder_multiplicity_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # Per-folder counts
-    #     self.overall_multiplicity_counts = defaultdict(lambda: defaultdict(int))  # Overall counts across all folders
-    #     sharing_patterns = defaultdict(int)  # Counts of sharing patterns across all PDB files
-
-    #     subfolders = os.listdir(self.sorted_pdb_folder)
-    #     overall_progress_bar = tqdm(total=len(subfolders), desc="Processing subfolders", ncols=100)
-
-    #     for subfolder in subfolders:
-    #         subfolder_path = os.path.join(self.sorted_pdb_folder, subfolder)
-    #         if os.path.isdir(subfolder_path):
-    #             pdb_files = [os.path.join(subfolder_path, f) for f in os.listdir(subfolder_path) if f.endswith('.pdb')]
-    #             subfolder_stats = defaultdict(list)
-    #             cluster_stats = defaultdict(list)  # Collect coordination numbers for this cluster size
-
-    #             # Removed file progress bar
-    #             # file_progress_bar = tqdm(total=len(pdb_files), desc=f"Processing files in {subfolder}", ncols=100)
-
-    #             for pdb_file in pdb_files:
-    #                 pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names,
-    #                                             shell_residue_names=self.shell_residue_names)
-
-    #                 # Create a mapping from atom IDs to atom objects
-    #                 pdb_handler.atom_id_map = {}
-    #                 for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
-    #                     pdb_handler.atom_id_map[atom.atom_id] = atom
-
-    #                 target_atoms = [atom for atom in pdb_handler.core_atoms if atom.element in target_elements]
-
-    #                 if target_atoms:
-    #                     file_neighbor_counts = defaultdict(lambda: {'count': 0, 'element': None})
-    #                     neighbor_to_targets = defaultdict(set)  # Mapping from neighbor atom ID to set of target atom IDs
-    #                     target_to_neighbors = defaultdict(set)  # Mapping from target atom ID to set of neighbor atom IDs
-
-    #                     for target_atom in target_atoms:
-    #                         coordination_stats, neighbor_atom_ids, counting_stats = self.calculate_coordination_numbers_for_atom(
-    #                             pdb_handler, target_atom, neighbor_elements, distance_thresholds
-    #                         )
-
-    #                         for pair, (coordination_number, _) in coordination_stats.items():
-    #                             subfolder_stats[pair].append(coordination_number)
-    #                             # Collect coordination numbers for cluster stats
-    #                             cluster_stats[pair].append(coordination_number)
-
-    #                         # Update mappings
-    #                         target_to_neighbors[target_atom.atom_id] = neighbor_atom_ids
-    #                         for neighbor_atom_id in neighbor_atom_ids:
-    #                             neighbor_to_targets[neighbor_atom_id].add(target_atom.atom_id)
-
-    #                         # Update file_neighbor_counts with counts from this target atom
-    #                         for neighbor_atom_id, stats in counting_stats.items():
-    #                             file_neighbor_counts[neighbor_atom_id]['count'] += stats['count']
-    #                             file_neighbor_counts[neighbor_atom_id]['element'] = stats['element']
-
-    #                         self.coordination_details[pdb_file].append({
-    #                             'target_atom_id': target_atom.atom_id,
-    #                             'target_atom_element': target_atom.element,
-    #                             'coordination_stats': coordination_stats,
-    #                             'neighbor_atom_ids': neighbor_atom_ids,
-    #                             'counting_stats': counting_stats
-    #                         })
-
-    #                     # After processing all target atoms, store the per-PDB-file neighbor counts
-    #                     self.per_file_neighbor_counts[pdb_file] = file_neighbor_counts
-
-    #                     # Aggregate counts per neighbor element and multiplicity for the current PDB file
-    #                     for neighbor_atom_id, stats in file_neighbor_counts.items():
-    #                         element = stats['element']
-    #                         multiplicity = stats['count']
-    #                         # Update per-folder counts
-    #                         self.per_folder_multiplicity_counts[subfolder][element][multiplicity] += 1
-    #                         # Update overall counts
-    #                         self.overall_multiplicity_counts[element][multiplicity] += 1
-
-    #                     # Identify sharing patterns
-    #                     # Group neighbor atoms by the set of target atoms they are coordinated with
-    #                     neighbor_groups = defaultdict(list)
-    #                     for neighbor_atom_id, target_atom_ids_set in neighbor_to_targets.items():
-    #                         key = frozenset(target_atom_ids_set)
-    #                         neighbor_groups[key].append(neighbor_atom_id)
-
-    #                     for target_atom_ids_set, neighbor_atom_ids in neighbor_groups.items():
-    #                         num_targets = len(target_atom_ids_set)
-    #                         num_neighbors = len(neighbor_atom_ids)
-
-    #                         # Include patterns with num_targets >= 1 if needed
-    #                         # if num_targets >= 1:
-    #                         # In your previous requests, you wanted to exclude patterns with only one target atom sharing
-    #                         # If you want to include them, adjust the condition accordingly
-    #                         if num_targets > 0:
-    #                             # Get the element names
-    #                             target_elements_involved = set()
-    #                             for target_atom_id in target_atom_ids_set:
-    #                                 target_atom = pdb_handler.atom_id_map[target_atom_id]
-    #                                 target_elements_involved.add(target_atom.element)
-
-    #                             neighbor_elements_involved = set()
-    #                             for neighbor_atom_id in neighbor_atom_ids:
-    #                                 neighbor_atom = pdb_handler.atom_id_map[neighbor_atom_id]
-    #                                 neighbor_elements_involved.add(neighbor_atom.element)
-
-    #                             # Assuming only one target element and one neighbor element involved
-    #                             if len(target_elements_involved) == 1 and len(neighbor_elements_involved) == 1:
-    #                                 target_element = next(iter(target_elements_involved))
-    #                                 neighbor_element = next(iter(neighbor_elements_involved))
-    #                             else:
-    #                                 # Handle cases where multiple elements are involved
-    #                                 target_element = ','.join(sorted(target_elements_involved))
-    #                                 neighbor_element = ','.join(sorted(neighbor_elements_involved))
-
-    #                             pattern = (num_targets, target_element, num_neighbors, neighbor_element)
-    #                             sharing_patterns[pattern] += 1
-
-    #                 # Removed file progress bar update
-    #                 # file_progress_bar.update(1)
-    #             # Removed file progress bar close
-    #             # file_progress_bar.close()
-
-    #             # Store the coordination stats for this subfolder
-    #             subfolder_coordination_stats[subfolder] = subfolder_stats
-    #             self.cluster_coordination_stats[subfolder] = cluster_stats  # Store cluster stats
-    #         overall_progress_bar.update(1)
-    #     overall_progress_bar.close()
-
-    #     return subfolder_coordination_stats, sharing_patterns
-
-    # def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
-    #     """
-    #     Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
-    #     track how many times each neighbor atom was counted in each PDB file, and identify sharing patterns.
-
-    #     Parameters:
-    #     - sorted_pdb_folder (str, optional): Path to the sorted PDB folder. If not provided,
-    #     the method will use the class attribute `self.sorted_pdb_folder`.
-    #     - target_elements (list, required): List of target elements to calculate coordination for.
-    #     - neighbor_elements (list, required): List of neighbor elements to calculate coordination with.
-    #     - distance_thresholds (dict, required): Dictionary with distance thresholds for each atom pair (e.g., {('Pb', 'I'): 3.6}).
-
-    #     Returns:
-    #     - subfolder_coordination_stats (dict): Dictionary with subfolder names as keys and coordination stats as values.
-    #     - sharing_patterns (dict): Dictionary containing counts of sharing patterns across all PDB files.
-    #     """
-    #     if target_elements is None or neighbor_elements is None or distance_thresholds is None:
-    #         raise ValueError("target_elements, neighbor_elements, and distance_thresholds must all be provided.")
-
-    #     if sorted_pdb_folder:
-    #         self.sorted_pdb_folder = sorted_pdb_folder
-    #     elif not hasattr(self, 'sorted_pdb_folder') or not os.path.exists(self.sorted_pdb_folder):
-    #         raise ValueError("Sorted PDB folder not found. Please run sort_pdb_files_by_node_count first or provide a sorted path.")
-
-    #     subfolder_coordination_stats = {}
-    #     self.cluster_coordination_stats = {}  # Initialize or reset the attribute
-    #     self.coordination_details = defaultdict(list)
-    #     self.per_file_neighbor_counts = defaultdict(dict)  # Store per-PDB-file neighbor counts
-    #     self.per_folder_multiplicity_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))  # Per-folder counts
-    #     self.overall_multiplicity_counts = defaultdict(lambda: defaultdict(int))  # Overall counts across all folders
-    #     sharing_patterns = defaultdict(int)  # Counts of sharing patterns across all PDB files
-
-    #     subfolders = os.listdir(self.sorted_pdb_folder)
-    #     overall_progress_bar = tqdm(total=len(subfolders), desc="Processing subfolders", ncols=100)
-
-    #     for subfolder in subfolders:
-    #         subfolder_path = os.path.join(self.sorted_pdb_folder, subfolder)
-    #         if os.path.isdir(subfolder_path):
-    #             pdb_files = [os.path.join(subfolder_path, f) for f in os.listdir(subfolder_path) if f.endswith('.pdb')]
-    #             subfolder_stats = defaultdict(list)
-    #             cluster_stats = defaultdict(list)  # Collect coordination numbers for this cluster size
-
-    #             # Removed file progress bar
-    #             # file_progress_bar = tqdm(total=len(pdb_files), desc=f"Processing files in {subfolder}", ncols=100)
-
-    #             for pdb_file in pdb_files:
-    #                 pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names,
-    #                                             shell_residue_names=self.shell_residue_names)
-
-    #                 # Create a mapping from atom IDs to atom objects
-    #                 pdb_handler.atom_id_map = {}
-    #                 for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms:
-    #                     pdb_handler.atom_id_map[atom.atom_id] = atom
-
-    #                 target_atoms = [atom for atom in pdb_handler.core_atoms if atom.element in target_elements]
-
-    #                 if target_atoms:
-    #                     file_neighbor_counts = defaultdict(lambda: {'count': 0, 'element': None})
-    #                     neighbor_to_targets = defaultdict(set)  # Mapping from neighbor atom ID to set of target atom IDs
-    #                     target_to_neighbors = defaultdict(set)  # Mapping from target atom ID to set of neighbor atom IDs
-
-    #                     for target_atom in target_atoms:
-    #                         coordination_stats, neighbor_atom_ids, counting_stats = self.calculate_coordination_numbers_for_atom(
-    #                             pdb_handler, target_atom, neighbor_elements, distance_thresholds
-    #                         )
-
-    #                         for pair, (coordination_number, _) in coordination_stats.items():
-    #                             subfolder_stats[pair].append(coordination_number)
-    #                             # Collect coordination numbers for cluster stats
-    #                             cluster_stats[pair].append(coordination_number)
-
-    #                         # Update mappings
-    #                         target_to_neighbors[target_atom.atom_id] = neighbor_atom_ids
-    #                         for neighbor_atom_id in neighbor_atom_ids:
-    #                             neighbor_to_targets[neighbor_atom_id].add(target_atom.atom_id)
-
-    #                         # Update file_neighbor_counts with counts from this target atom
-    #                         for neighbor_atom_id, stats in counting_stats.items():
-    #                             file_neighbor_counts[neighbor_atom_id]['count'] += stats['count']
-    #                             file_neighbor_counts[neighbor_atom_id]['element'] = stats['element']
-
-    #                         self.coordination_details[pdb_file].append({
-    #                             'target_atom_id': target_atom.atom_id,
-    #                             'target_atom_element': target_atom.element,
-    #                             'coordination_stats': coordination_stats,
-    #                             'neighbor_atom_ids': neighbor_atom_ids,
-    #                             'counting_stats': counting_stats
-    #                         })
-
-    #                     # After processing all target atoms, store the per-PDB-file neighbor counts
-    #                     self.per_file_neighbor_counts[pdb_file] = file_neighbor_counts
-
-    #                     # Aggregate counts per neighbor element and multiplicity for the current PDB file
-    #                     for neighbor_atom_id, stats in file_neighbor_counts.items():
-    #                         element = stats['element']
-    #                         multiplicity = stats['count']
-    #                         # Update per-folder counts
-    #                         self.per_folder_multiplicity_counts[subfolder][element][multiplicity] += 1
-    #                         # Update overall counts
-    #                         self.overall_multiplicity_counts[element][multiplicity] += 1
-
-    #                     # Identify sharing patterns
-    #                     # Group neighbor atoms by the set of target atoms they are coordinated with
-    #                     neighbor_groups = defaultdict(list)
-    #                     for neighbor_atom_id, target_atom_ids_set in neighbor_to_targets.items():
-    #                         key = frozenset(target_atom_ids_set)
-    #                         neighbor_groups[key].append(neighbor_atom_id)
-
-    #                     for target_atom_ids_set, neighbor_atom_ids in neighbor_groups.items():
-    #                         num_targets = len(target_atom_ids_set)
-    #                         num_neighbors = len(neighbor_atom_ids)
-
-    #                         # Include patterns with num_targets >= 1 if needed
-    #                         # if num_targets >= 1:
-    #                         # In your previous requests, you wanted to exclude patterns with only one target atom sharing
-    #                         # If you want to include them, adjust the condition accordingly
-    #                         if num_targets > 0:
-    #                             # Get the element names
-    #                             target_elements_involved = set()
-    #                             for target_atom_id in target_atom_ids_set:
-    #                                 target_atom = pdb_handler.atom_id_map[target_atom_id]
-    #                                 target_elements_involved.add(target_atom.element)
-
-    #                             neighbor_elements_involved = set()
-    #                             for neighbor_atom_id in neighbor_atom_ids:
-    #                                 neighbor_atom = pdb_handler.atom_id_map[neighbor_atom_id]
-    #                                 neighbor_elements_involved.add(neighbor_atom.element)
-
-    #                             # Assuming only one target element and one neighbor element involved
-    #                             if len(target_elements_involved) == 1 and len(neighbor_elements_involved) == 1:
-    #                                 target_element = next(iter(target_elements_involved))
-    #                                 neighbor_element = next(iter(neighbor_elements_involved))
-    #                             else:
-    #                                 # Handle cases where multiple elements are involved
-    #                                 target_element = ','.join(sorted(target_elements_involved))
-    #                                 neighbor_element = ','.join(sorted(neighbor_elements_involved))
-
-    #                             pattern = (num_targets, target_element, num_neighbors, neighbor_element)
-    #                             sharing_patterns[pattern] += 1
-
-    #                 # Removed file progress bar update
-    #                 # file_progress_bar.update(1)
-    #             # Removed file progress bar close
-    #             # file_progress_bar.close()
-
-    #             # Store the coordination stats for this subfolder
-    #             subfolder_coordination_stats[subfolder] = subfolder_stats
-    #             self.cluster_coordination_stats[subfolder] = cluster_stats  # Store cluster stats
-    #         overall_progress_bar.update(1)
-    #     overall_progress_bar.close()
-
-    #     return subfolder_coordination_stats, sharing_patterns
-
     def calculate_coordination_stats_by_subfolder(self, sorted_pdb_folder=None, target_elements=None, neighbor_elements=None, distance_thresholds=None):
         """
         Calculate coordination statistics for all target elements coordinated by neighbor elements in each subfolder,
@@ -1242,6 +936,90 @@ class ClusterBatchAnalyzer:
         volume, hull = self.estimate_connected_volume_with_outward_facing_points(centers, radii)
         return volume
     
+    ## -- SAXS Calculations
+    def calculate_total_iq(self, q_values, shape_type='sphere'):
+        """
+        Calculate the total scattering intensity I(q) for the polydisperse distribution of clusters.
+        This is done as a weighted average of I(q) values, where the weights are the number of clusters of each size.
+
+        Parameters:
+        - q_values: A numpy array of q-values in inverse angstroms.
+        - shape_type: 'sphere' or 'ellipsoid' to choose the volume calculation method.
+        
+        Returns:
+        - total_iq: A numpy array of weighted average I(q) values.
+        """
+        total_iq = np.zeros_like(q_values)
+        total_clusters = 0
+        
+        for data in self.cluster_data:
+            # Retrieve the volume and scattering dimensions based on the cluster shape
+            if shape_type == 'sphere':
+                volume = data['volume']
+                sphere_scattering = SphereScattering(volume=volume)
+                iq_values = sphere_scattering.calculate_iq(q_values)
+            elif shape_type == 'ellipsoid':
+                Rgx = data['Rgx']
+                Rgy = data['Rgy']
+                Rgz = data['Rgz']
+                ellipsoid_scattering = EllipsoidScattering(a=Rgx, b=Rgy, c=Rgz)
+                iq_values = ellipsoid_scattering.calculate_iq(q_values)
+            else:
+                raise ValueError(f"Unknown shape type: {shape_type}")
+
+            # Weight I(q) by the number of clusters of this size
+            num_clusters = len(self.cluster_size_distribution[data['cluster_size']])
+            weighted_iq = iq_values * num_clusters
+            # Add to the total I(q)
+            total_iq += weighted_iq
+            # Accumulate the total number of clusters
+            total_clusters += num_clusters
+
+        # Normalize by the total number of clusters to get the weighted average
+        total_iq /= total_clusters
+        
+        return total_iq
+
+    def plot_total_iq(self, q_values):
+        """
+        Plot the total I(q) vs. q on a log-log scale.
+        
+        Parameters:
+        - q_values: A numpy array of q-values in inverse angstroms.
+        """
+        total_iq = self.calculate_total_iq(q_values)
+        
+        # Create the plot
+        plt.figure(figsize=(8, 6))
+        plt.loglog(q_values, total_iq, marker='o', linestyle='-', color='r')
+        plt.xlabel('q (Å⁻¹)')
+        plt.ylabel('I(q)')
+        plt.title('Total Scattering Intensity I(q) vs. Scattering Vector q')
+        plt.grid(True, which="both", ls="--")
+        plt.show()
+
+    def save_total_iq(self, q_values, sample_name="sample"):
+        """
+        Save the total I(q) vs. q data to a .txt file.
+        
+        Parameters:
+        - q_values: A numpy array of q-values in inverse angstroms.
+        - sample_name: A string prefix for the filename.
+        """
+        total_iq = self.calculate_total_iq(q_values)
+        
+        # Get the current timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create the filename with the sample name and timestamp
+        filename = f"{sample_name}_IQ_{timestamp}.txt"
+        
+        # Save the data to the file
+        data = np.column_stack((q_values, total_iq))
+        np.savetxt(filename, data, header="q (Å⁻¹)\tI(q)", fmt="%.6e", delimiter="\t")
+        
+        print(f"Total I(q) saved to {filename}")
+        
     ## -- Plotting Methods
     @staticmethod
     def custom_glossy_marker(ax, x, y, base_color, markersize=8, offset=(0.08, 0.08)):
@@ -1632,91 +1410,7 @@ class ClusterBatchAnalyzer:
 
         plt.show()
 
-    ## -- SAXS Calculations
-    def calculate_total_iq(self, q_values, shape_type='sphere'):
-        """
-        Calculate the total scattering intensity I(q) for the polydisperse distribution of clusters.
-        This is done as a weighted average of I(q) values, where the weights are the number of clusters of each size.
-
-        Parameters:
-        - q_values: A numpy array of q-values in inverse angstroms.
-        - shape_type: 'sphere' or 'ellipsoid' to choose the volume calculation method.
-        
-        Returns:
-        - total_iq: A numpy array of weighted average I(q) values.
-        """
-        total_iq = np.zeros_like(q_values)
-        total_clusters = 0
-        
-        for data in self.cluster_data:
-            # Retrieve the volume and scattering dimensions based on the cluster shape
-            if shape_type == 'sphere':
-                volume = data['volume']
-                sphere_scattering = SphereScattering(volume=volume)
-                iq_values = sphere_scattering.calculate_iq(q_values)
-            elif shape_type == 'ellipsoid':
-                Rgx = data['Rgx']
-                Rgy = data['Rgy']
-                Rgz = data['Rgz']
-                ellipsoid_scattering = EllipsoidScattering(a=Rgx, b=Rgy, c=Rgz)
-                iq_values = ellipsoid_scattering.calculate_iq(q_values)
-            else:
-                raise ValueError(f"Unknown shape type: {shape_type}")
-
-            # Weight I(q) by the number of clusters of this size
-            num_clusters = len(self.cluster_size_distribution[data['cluster_size']])
-            weighted_iq = iq_values * num_clusters
-            # Add to the total I(q)
-            total_iq += weighted_iq
-            # Accumulate the total number of clusters
-            total_clusters += num_clusters
-
-        # Normalize by the total number of clusters to get the weighted average
-        total_iq /= total_clusters
-        
-        return total_iq
-
-    def plot_total_iq(self, q_values):
-        """
-        Plot the total I(q) vs. q on a log-log scale.
-        
-        Parameters:
-        - q_values: A numpy array of q-values in inverse angstroms.
-        """
-        total_iq = self.calculate_total_iq(q_values)
-        
-        # Create the plot
-        plt.figure(figsize=(8, 6))
-        plt.loglog(q_values, total_iq, marker='o', linestyle='-', color='r')
-        plt.xlabel('q (Å⁻¹)')
-        plt.ylabel('I(q)')
-        plt.title('Total Scattering Intensity I(q) vs. Scattering Vector q')
-        plt.grid(True, which="both", ls="--")
-        plt.show()
-
-    def save_total_iq(self, q_values, sample_name="sample"):
-        """
-        Save the total I(q) vs. q data to a .txt file.
-        
-        Parameters:
-        - q_values: A numpy array of q-values in inverse angstroms.
-        - sample_name: A string prefix for the filename.
-        """
-        total_iq = self.calculate_total_iq(q_values)
-        
-        # Get the current timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Create the filename with the sample name and timestamp
-        filename = f"{sample_name}_IQ_{timestamp}.txt"
-        
-        # Save the data to the file
-        data = np.column_stack((q_values, total_iq))
-        np.savetxt(filename, data, header="q (Å⁻¹)\tI(q)", fmt="%.6e", delimiter="\t")
-        
-        print(f"Total I(q) saved to {filename}")
-        
-    ## -- New Plotting Methods
+    ## -- Batch Sorted Plotting Methods
     # Average Coordination Number by Cluster Size and Neighboring Element
     def plot_average_coordination_numbers(self):
         """
@@ -1894,473 +1588,6 @@ class ClusterBatchAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    # Methods for Plotting Coordination Number Distributions
-    def format_combination_label(self, combination):
-        """
-        Formats the coordination combination tuple into a readable string.
-        """
-        parts = [f"{neighbor_elem}:{coord_num}" for neighbor_elem, coord_num in combination]
-        label = ', '.join(parts)
-        return label
-
-    def prepare_coordination_distribution_data(self):
-        """
-        Prepares data for plotting the distribution of coordination numbers,
-        including the counts of specific coordination combinations.
-        """
-        import pandas as pd
-
-        data = []
-        for pdb_file, details_list in self.coordination_details.items():
-            for details in details_list:
-                target_atom_element = details['target_atom_element']
-                coordination_stats = details['coordination_stats']
-
-                # Collect coordination numbers with each neighbor element
-                neighbor_coords = {}
-                total_coordination_number = 0
-                for (target_elem, neighbor_elem), (coord_num, _) in coordination_stats.items():
-                    neighbor_coords[neighbor_elem] = coord_num
-                    total_coordination_number += coord_num
-
-                # Create a tuple representing the coordination combination
-                # We'll sort the items to ensure consistent ordering
-                coordination_combination = tuple(sorted(neighbor_coords.items()))
-
-                data.append({
-                    'Total Coordination Number': total_coordination_number,
-                    'Coordination Combination': coordination_combination,
-                    'Target Atom Element': target_atom_element
-                })
-
-        # Create a DataFrame
-        df = pd.DataFrame(data)
-
-        # Ensure 'Target Atom Element' is included in the grouping
-        coordination_distribution = df.groupby(
-            ['Total Coordination Number', 'Coordination Combination', 'Target Atom Element']
-        ).size().reset_index(name='Count')
-
-        # Calculate total counts for each total coordination number and target atom element
-        total_counts = coordination_distribution.groupby(
-            ['Total Coordination Number', 'Target Atom Element']
-        )['Count'].sum().reset_index(name='Total Count')
-
-        # Merge total counts back into the DataFrame
-        coordination_distribution = coordination_distribution.merge(
-            total_counts, on=['Total Coordination Number', 'Target Atom Element']
-        )
-
-        # Calculate the percentage for each coordination combination
-        coordination_distribution['Percentage'] = (
-            coordination_distribution['Count'] / coordination_distribution['Total Count']
-        ) * 100
-
-        # Sort the DataFrame for consistent plotting
-        coordination_distribution.sort_values(
-            by=['Total Coordination Number', 'Target Atom Element', 'Percentage'],
-            ascending=[True, True, False], inplace=True
-        )
-
-        self.coordination_distribution_df = coordination_distribution  # Store for later use
-
-    def plot_coordination_number_distribution(self):
-        """
-        Plots a stacked histogram of the total coordination numbers,
-        showing the distribution of specific coordination combinations.
-        Blocks are stacked in order based on the ratio of the two neighboring atoms.
-        In cases where one coordination atom is zero, blocks are stacked in ascending order
-        of the count of the other neighboring atom.
-        """
-        import matplotlib.pyplot as plt
-        import pandas as pd
-        import seaborn as sns
-        import numpy as np
-        from matplotlib.colors import to_rgba
-        from matplotlib.ticker import MaxNLocator, AutoMinorLocator
-
-        # Ensure data is prepared
-        if not hasattr(self, 'coordination_distribution_df'):
-            self.prepare_coordination_distribution_data()
-        df = self.coordination_distribution_df.copy()
-
-        # Compute global total count
-        global_total_count = df['Count'].sum()
-
-        # Pivot the DataFrame
-        pivot_df = df.pivot_table(
-            index='Total Coordination Number',
-            columns='Coordination Combination',
-            values='Count',
-            aggfunc='sum',
-            fill_value=0
-        )
-
-        # Get the list of unique total coordination numbers
-        total_coord_numbers = pivot_df.index.tolist()
-
-        # Get neighbor elements for dynamic x-axis label
-        neighbor_elements = set()
-        for combination in df['Coordination Combination']:
-            for neighbor_elem, _ in combination:
-                neighbor_elements.add(neighbor_elem)
-        neighbor_elements = sorted(neighbor_elements)
-        neighbor_elements_str = ', '.join(neighbor_elements)
-
-        # Get target atom elements for dynamic labels
-        target_elements = df['Target Atom Element'].unique()
-        target_elements_str = ', '.join(target_elements)
-
-        # Define colors for each total coordination number from 'tab20b' palette
-        num_total_coord_numbers = len(total_coord_numbers)
-        full_color_palette = sns.color_palette('tab20b', 20)  # 'tab20b' has 20 colors
-        # Evenly space colors across the palette
-        color_indices = np.linspace(0, 19, num=num_total_coord_numbers, dtype=int)
-        base_color_palette = [full_color_palette[i] for i in color_indices]
-        total_coord_color_map = dict(zip(total_coord_numbers, base_color_palette))
-
-        # Create a mapping of coordination combinations to shades
-        # We'll store the shades used for each combination to reuse in the next plot
-        self.combination_color_map = {}
-
-        # Precompute total counts for each total coordination number
-        total_counts_per_coord_num = df.groupby('Total Coordination Number')['Count'].sum().to_dict()
-
-        # Find the maximum total count
-        max_total_count = max(total_counts_per_coord_num.values())
-
-        # Calculate y_max
-        y_max = ((int(max_total_count) + 9) // 10) * 10
-
-        # Set up the plot
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.set_ylim(0, y_max)
-
-        # Set bar width to make columns narrower
-        bar_width = 0.5  # Adjust this value as needed (default is 0.8)
-
-        # Ensure neighbor_elements are sorted for consistent ordering
-        neighbor_elements = sorted(neighbor_elements)
-        if len(neighbor_elements) >= 2:
-            elem1, elem2 = neighbor_elements[0], neighbor_elements[1]
-        else:
-            # Handle cases with less than two neighbor elements
-            elem1 = neighbor_elements[0]
-            elem2 = None
-
-        # Loop over total coordination numbers to plot each bar
-        for idx, total_coord_num in enumerate(total_coord_numbers):
-            # Filter df for the current total coordination number
-            current_df = df[df['Total Coordination Number'] == total_coord_num]
-
-            # Sum counts for each coordination combination
-            counts = current_df.groupby('Coordination Combination')['Count'].sum()
-
-            # Get the precomputed total count for this total coordination number
-            total_count = total_counts_per_coord_num[total_coord_num]
-
-            # Base color for this total coordination number
-            base_color = total_coord_color_map[total_coord_num]
-            base_rgba = to_rgba(base_color)
-
-            # Generate shades for combinations
-            num_combinations = len(counts)
-            shades = np.linspace(1.0, 0.6, num_combinations)
-
-            # Prepare combinations_counts list
-            combinations_counts = list(counts.items())
-
-            # Define sorting key function
-            def sorting_key_function(item):
-                combination, count = item
-                # Extract coordination numbers for neighbor elements
-                coord_nums = {elem: coord_num for elem, coord_num in combination}
-                # Get coordination numbers for the two neighbor elements
-                coord_num1 = coord_nums.get(elem1, 0)
-                coord_num2 = coord_nums.get(elem2, 0) if elem2 else 0
-                if coord_num1 > 0 and coord_num2 > 0:
-                    ratio = coord_num1 / coord_num2
-                    return (0, -ratio)
-                elif (coord_num1 == 0 and coord_num2 > 0) or (coord_num2 == 0 and coord_num1 > 0):
-                    # Stack in ascending order of the non-zero coordination number
-                    non_zero_coord_num = coord_num1 if coord_num1 > 0 else coord_num2
-                    return (1, non_zero_coord_num)
-                else:
-                    # Both coordination numbers are zero
-                    return (2, 0)
-
-            # Sort combinations based on the sorting key
-            sorted_combinations = sorted(combinations_counts, key=sorting_key_function)
-
-            # Now assign colors and plot
-            bottom = 0
-            for comb_idx, (combination, count) in enumerate(sorted_combinations):
-                if count == 0:
-                    continue  # Skip zero counts
-
-                # Color for this block
-                shade = shades[comb_idx]
-                color = tuple(np.array(base_rgba[:3]) * shade) + (1.0,)
-
-                # Save the color mapping for this combination
-                self.combination_color_map[combination] = color
-
-                # Compute global percentage
-                global_percentage = (count / global_total_count) * 100
-
-                # Plot the block
-                ax.bar(
-                    total_coord_num,
-                    count,
-                    bottom=bottom,
-                    color=color,
-                    edgecolor='black',
-                    width=bar_width,
-                    align='center'
-                )
-
-                # Determine text color based on background brightness
-                brightness = np.mean(color[:3])
-                text_color = 'black' if brightness > 0.5 else 'white'
-
-                # Prepare the label (coordination combination only)
-                label = f"{self.format_combination_label(combination)}"
-
-                # Place the coordination combination label inside the block
-                ax.text(
-                    total_coord_num,
-                    bottom + count / 2,
-                    label,
-                    ha='center',
-                    va='center',
-                    fontsize=10,
-                    rotation=0,
-                    color=text_color
-                )
-
-                # Place the global percentage annotation to the right of the block
-                ax.text(
-                    total_coord_num + bar_width / 2 + 0.05,
-                    bottom + count / 2,
-                    f"{global_percentage:.1f}%",
-                    ha='left',
-                    va='center',
-                    fontsize=10,
-                    color='black'
-                )
-
-                bottom += count
-
-            # Calculate total percentage for this total coordination number
-            total_percentage = (total_count / global_total_count) * 100
-
-            # Place the total percentage annotation at the top of the column
-            ax.text(
-                total_coord_num,
-                total_count + y_max * 0.01,  # Slightly above the top of the bar
-                f"{total_percentage:.1f}%",
-                ha='center',
-                va='bottom',
-                fontsize=10,
-                color='black'
-            )
-
-        # Set y-axis to integer ticks
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set_yticks(range(0, y_max + 1, 10))
-
-        # Add minor ticks to the y-axis
-        ax.yaxis.set_minor_locator(AutoMinorLocator())
-        ax.grid(which='minor', axis='y', linestyle='--', alpha=0.3)
-
-        # Set labels and title with enlarged font sizes
-        ax.set_xlabel(f'Total {target_elements_str} Coordination Number', fontsize=14)
-        ax.set_ylabel(f'Number of {target_elements_str} Atoms', fontsize=14)
-        ax.set_title('Distribution of Coordination Numbers and Environments', fontsize=16)
-
-        # Enlarge axis tick labels
-        ax.tick_params(axis='both', which='major', labelsize=12)
-
-        # Remove the legend
-        ax.legend().set_visible(False)
-
-        plt.tight_layout()
-        plt.show()
-
-    def plot_neighbor_atom_distribution(self, neighbor_atom):
-        """
-        Plots a histogram where each bar represents the number of coordinated neighbor atoms,
-        and blocks within each bar are stacked in order of Total Coordination Number from top down.
-        """
-        import matplotlib.pyplot as plt
-        import pandas as pd
-        import seaborn as sns
-        import numpy as np
-        from matplotlib.colors import to_rgba
-        from matplotlib.ticker import MaxNLocator, AutoMinorLocator
-
-        # Ensure data is prepared
-        if not hasattr(self, 'coordination_distribution_df'):
-            self.prepare_coordination_distribution_data()
-        df = self.coordination_distribution_df.copy()
-
-        # Ensure combination_color_map is available
-        if not hasattr(self, 'combination_color_map'):
-            self.plot_coordination_number_distribution()  # This will generate the mapping
-            df = self.coordination_distribution_df.copy()
-
-        # Compute global total count
-        global_total_count = df['Count'].sum()
-
-        # Extract target atom elements for dynamic labels
-        target_elements = df['Target Atom Element'].unique()
-        target_elements_str = ', '.join(target_elements)
-
-        # Extract coordination number for the specified neighbor atom
-        def get_neighbor_coord_num(combination):
-            for elem, coord_num in combination:
-                if elem == neighbor_atom:
-                    return coord_num
-            return 0  # If the neighbor atom is not in the combination
-
-        df['Neighbor Coordination Number'] = df['Coordination Combination'].apply(get_neighbor_coord_num)
-
-        # Group by Neighbor Coordination Number, Coordination Combination, and Total Coordination Number
-        grouped_df = df.groupby(['Neighbor Coordination Number', 'Coordination Combination', 'Total Coordination Number'])['Count'].sum().reset_index()
-
-        # Precompute total counts for each neighbor coordination number
-        total_counts_per_neighbor_coord_num = grouped_df.groupby('Neighbor Coordination Number')['Count'].sum().to_dict()
-
-        # Find the maximum total count
-        max_total_count = max(total_counts_per_neighbor_coord_num.values())
-
-        # Calculate y_max
-        y_max = ((int(max_total_count) + 9) // 10) * 10
-
-        # Set up the plot
-        fig, ax = plt.subplots(figsize=(12, 8))
-        ax.set_ylim(0, y_max)
-
-        # Get the list of unique neighbor coordination numbers
-        neighbor_coord_numbers = sorted(grouped_df['Neighbor Coordination Number'].unique())
-
-        # Set bar width to make columns narrower
-        bar_width = 0.5  # Adjust as needed
-
-        # Define a function to format the combination label excluding the neighbor atom
-        def format_combination_label_exclude(combination, exclude_atom):
-            # Exclude the neighbor atom being focused on from the combination
-            filtered_combination = [(elem, coord_num) for elem, coord_num in combination if elem != exclude_atom]
-            # Format the remaining combination
-            if filtered_combination:
-                label_parts = [f"{elem}:{int(coord_num)}" for elem, coord_num in filtered_combination]
-                label = ', '.join(label_parts)
-            else:
-                label = ''
-            return label
-
-        # Loop over neighbor coordination numbers to plot each bar
-        for idx, neighbor_coord_num in enumerate(neighbor_coord_numbers):
-            # Filter data for the current neighbor coordination number
-            current_df = grouped_df[grouped_df['Neighbor Coordination Number'] == neighbor_coord_num]
-
-            # Sort combinations by 'Total Coordination Number' descending
-            sorted_combinations = current_df.sort_values('Total Coordination Number', ascending=False)
-
-            # Get the total count for this neighbor coordination number
-            total_count = total_counts_per_neighbor_coord_num[neighbor_coord_num]
-
-            bottom = 0
-            for _, row in sorted_combinations.iterrows():
-                combination = row['Coordination Combination']
-                count = row['Count']
-                total_coord_num = row['Total Coordination Number']
-
-                # Retrieve the color from the combination_color_map
-                color = self.combination_color_map.get(combination, (0.5, 0.5, 0.5, 1.0))  # Default to gray if not found
-
-                # Compute global percentage
-                global_percentage = (count / global_total_count) * 100
-
-                # Plot the block
-                ax.bar(
-                    neighbor_coord_num,
-                    count,
-                    bottom=bottom,
-                    color=color,
-                    edgecolor='black',
-                    width=bar_width,
-                    align='center'
-                )
-
-                # Determine text color based on background brightness
-                brightness = np.mean(color[:3])
-                text_color = 'black' if brightness > 0.5 else 'white'
-
-                # Prepare the label excluding the neighbor atom
-                label = format_combination_label_exclude(combination, neighbor_atom)
-
-                # Place the coordination combination label inside the block
-                ax.text(
-                    neighbor_coord_num,
-                    bottom + count / 2,
-                    label,
-                    ha='center',
-                    va='center',
-                    fontsize=10,
-                    rotation=0,
-                    color=text_color
-                )
-
-                # Place the global percentage annotation to the right of the block
-                ax.text(
-                    neighbor_coord_num + bar_width / 2 + 0.05,
-                    bottom + count / 2,
-                    f"{global_percentage:.1f}%",
-                    ha='left',
-                    va='center',
-                    fontsize=10,
-                    color='black'
-                )
-
-                bottom += count
-
-            # Calculate total percentage for this neighbor coordination number
-            total_percentage = (total_count / global_total_count) * 100
-
-            # Place the total percentage annotation at the top of the column
-            ax.text(
-                neighbor_coord_num,
-                total_count + y_max * 0.01,  # Slightly above the top of the bar
-                f"{total_percentage:.1f}%",
-                ha='center',
-                va='bottom',
-                fontsize=10,
-                color='black'
-            )
-
-        # Set y-axis to integer ticks
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set_yticks(range(0, y_max + 1, 10))
-
-        # Add minor ticks to the y-axis
-        ax.yaxis.set_minor_locator(AutoMinorLocator())
-        ax.grid(which='minor', axis='y', linestyle='--', alpha=0.3)
-
-        # Set labels and title
-        ax.set_xlabel(f'Total Coordinating {neighbor_atom} Atoms', fontsize=14)
-        ax.set_ylabel(f'Number of {target_elements_str} Atoms', fontsize=14)
-        ax.set_title(f'Distribution of {neighbor_atom} Coordination Numbers', fontsize=16)
-
-        # Enlarge axis tick labels
-        ax.tick_params(axis='both', which='major', labelsize=12)
-
-        # Remove the legend
-        ax.legend().set_visible(False)
-
-        plt.tight_layout()
-        plt.show()
-
     # Plotting Sharing Pattern Distributions
     def plot_sharing_pattern_distribution(self, neighbor_atom):
         """
@@ -2467,142 +1694,38 @@ class ClusterBatchAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    # def plot_sharing_pattern_histogram(self, sharing_patterns, neighbor_atom):
+    # def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb', color_palette='Pastel1'):
     #     """
     #     Plots a histogram where the x-axis represents specific sharing patterns between target atoms
-    #     and the specified neighbor atom. The y-axis represents the counts of target atoms that exhibit
-    #     each sharing pattern.
-
+    #     and neighbor atoms. The y-axis represents the number of instances of each sharing pattern.
+        
     #     Parameters:
     #     - sharing_patterns (dict): The sharing patterns data.
-    #     - neighbor_atom (str): The neighbor atom type to focus on (e.g., 'I').
+    #     - target_atom (str): The target atom type to focus on (e.g., 'Pb').
+    #     - color_palette (str): The color palette to use for the histogram bars.
+    #                             Options: 'Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c'.
+    #                             Default is 'Pastel1'.
     #     """
-    #     import matplotlib.pyplot as plt
-    #     import numpy as np
-    #     from collections import defaultdict
-
-    #     # Data structures
-    #     neighbor_to_targets = defaultdict(set)  # Maps neighbor atom IDs to sets of connected target atom IDs
-    #     target_to_neighbors = defaultdict(set)  # Maps target atom IDs to sets of connected neighbor atom IDs
-    #     target_elements_set = set()  # To collect target elements for dynamic labeling
-
-    #     # Iterate over the coordination details
-    #     for pdb_file, target_atom_data_list in self.coordination_details.items():
-    #         for target_atom_data in target_atom_data_list:
-    #             target_atom_id = target_atom_data['target_atom_id']
-    #             target_atom_element = target_atom_data['target_atom_element']
-    #             neighbor_atom_ids = target_atom_data['neighbor_atom_ids']
-    #             counting_stats = target_atom_data['counting_stats']
-
-    #             target_elements_set.add(target_atom_element)
-
-    #             # Filter neighbor atoms of the specified type
-    #             neighbor_atom_ids_of_type = set()
-    #             for neighbor_atom_id in neighbor_atom_ids:
-    #                 neighbor_info = counting_stats[neighbor_atom_id]
-    #                 neighbor_element = neighbor_info['element']
-    #                 if neighbor_element == neighbor_atom:
-    #                     neighbor_atom_ids_of_type.add(neighbor_atom_id)
-    #                     neighbor_to_targets[neighbor_atom_id].add(target_atom_id)
-
-    #             if neighbor_atom_ids_of_type:
-    #                 target_to_neighbors[target_atom_id].update(neighbor_atom_ids_of_type)
-    #             # Else, the target atom has no neighbors of the specified type and is excluded
-
-    #     # Now, identify shared and non-shared neighbor atoms
-    #     shared_neighbors = {neighbor_id for neighbor_id, targets in neighbor_to_targets.items() if len(targets) > 1}
-    #     non_shared_neighbors = {neighbor_id for neighbor_id, targets in neighbor_to_targets.items() if len(targets) == 1}
-
-    #     # Categorize target atoms
-    #     pattern_counts = defaultdict(int)  # Key: (num_targets, num_neighbors), Value: count of target atoms
-
-    #     # For target atoms
-    #     for target_atom_id, neighbor_ids in target_to_neighbors.items():
-    #         # Separate shared and non-shared neighbor atoms
-    #         shared_neighbor_ids = neighbor_ids & shared_neighbors
-    #         non_shared_neighbor_ids = neighbor_ids & non_shared_neighbors
-
-    #         if shared_neighbor_ids:
-    #             # Target atom is involved in sharing
-    #             # Collect sharing patterns based on the groups of target atoms sharing neighbors
-    #             # For simplicity, we will consider each shared neighbor separately
-    #             # Note: This may result in multiple counts per target atom if it shares multiple neighbors differently
-    #             for neighbor_id in shared_neighbor_ids:
-    #                 targets_sharing = neighbor_to_targets[neighbor_id]
-    #                 num_targets = len(targets_sharing)
-    #                 num_neighbors = 1  # Since we're considering one shared neighbor at a time
-    #                 key = (num_targets, num_neighbors)
-    #                 pattern_counts[key] += 1  # Count the target atom
-    #         elif non_shared_neighbor_ids:
-    #             # Target atom has neighbor atoms but does not share any of them
-    #             key = (1, 0)
-    #             pattern_counts[key] += 1  # Count the target atom
-
-    #     # Prepare data for plotting
-    #     patterns = list(pattern_counts.keys())
-    #     counts = [pattern_counts[pattern] for pattern in patterns]
-
-    #     # Sort patterns for consistent plotting
-    #     patterns_sorted = sorted(patterns, key=lambda x: (x[0], x[1]))
-    #     counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
-
-    #     # Create x-axis labels
-    #     x_labels = [f"{tgt}$_{{{shr}}}$" for tgt, shr in patterns_sorted]
-
-    #     # Prepare dynamic axis labels
-    #     target_elements_str = ', '.join(sorted(target_elements_set))
-
-    #     # Plotting
-    #     fig, ax = plt.subplots(figsize=(12, 8))
-
-    #     x_positions = np.arange(len(x_labels))
-    #     ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
-
-    #     ax.set_xticks(x_positions)
-    #     ax.set_xticklabels(x_labels, fontsize=12)
-
-    #     # Set labels and title
-    #     ax.set_xlabel(f"Number of {target_elements_str} Atoms Sharing {neighbor_atom} Neighbors", fontsize=14)
-    #     ax.set_ylabel(f"Number of {target_elements_str} Atoms", fontsize=14)
-    #     ax.set_title(f"Sharing Patterns of {neighbor_atom} Neighbors among {target_elements_str} Atoms", fontsize=16)
-
-    #     # Show grid
-    #     ax.grid(axis='y', linestyle='--', alpha=0.7)
-
-    #     plt.tight_layout()
-    #     plt.show()
-
-    # def plot_sharing_pattern_histogram(self, sharing_patterns, neighbor_atom):
-    #     """
-    #     Plots a histogram where the x-axis represents specific sharing patterns between target atoms
-    #     and the specified neighbor atom. The y-axis represents the number of instances of each sharing pattern.
-
-    #     Parameters:
-    #     - sharing_patterns (dict): The sharing patterns data.
-    #     - neighbor_atom (str): The neighbor atom type to focus on (e.g., 'I').
-    #     """
-    #     import matplotlib.pyplot as plt
-    #     import numpy as np
-    #     from collections import defaultdict
-
+    #     # Supported color palettes
+    #     supported_palettes = ['Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c']
+        
+    #     # Validate the color_palette parameter
+    #     if color_palette not in supported_palettes:
+    #         raise ValueError(f"Invalid color_palette '{color_palette}'. Supported palettes are: {supported_palettes}")
+        
     #     # Data structures
     #     pattern_counts = defaultdict(int)  # Key: 'N_M', Value: count of instances
-    #     target_elements_set = set()  # To collect target elements for dynamic labeling
-
     #     total_instances_num_targets_eq_1 = 0  # To sum counts where num_targets == 1
 
     #     # Process sharing_patterns
     #     for pattern, count in sharing_patterns.items():
     #         num_targets, target_element, num_neighbors, neighbor_element = pattern
 
-    #         if neighbor_element != neighbor_atom:
-    #             continue  # Skip patterns not involving the specified neighbor atom
-
-    #         # Collect target elements for dynamic labeling
-    #         target_elements_set.add(target_element)
+    #         if target_element != target_atom:
+    #             continue  # Skip patterns not involving the specified target atom
 
     #         if num_targets == 1:
-    #             # Sum all instances where num_targets == 1, regardless of num_neighbors
+    #             # Sum all instances where num_targets == 1 under '1_0'
     #             total_instances_num_targets_eq_1 += count
     #         else:
     #             # Create the 'N_M' label
@@ -2625,11 +1748,8 @@ class ClusterBatchAnalyzer:
     #     patterns_sorted = sorted(patterns, key=sort_key)
     #     counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
 
-    #     # Create x-axis labels with subscripts
+    #     # Create x-axis labels with subscripts (e.g., '1$_{0}$')
     #     x_labels = [label.replace('_', '$_{') + '}$' for label in patterns_sorted]
-
-    #     # Prepare dynamic axis labels
-    #     target_elements_str = ', '.join(sorted(target_elements_set))
 
     #     # Debug: Print the patterns being assigned
     #     print("\nAssigned Sharing Patterns:")
@@ -2639,27 +1759,65 @@ class ClusterBatchAnalyzer:
     #         num_neighbors = int(num_neighbors)
     #         print(f"Pattern {num_targets}_{num_neighbors}: {pattern_counts[key]} instance(s)")
 
+    #     # Number of histogram blocks
+    #     num_blocks = len(x_labels)
+
+    #     # Retrieve the selected colormap
+    #     cmap = plt.get_cmap(color_palette)
+        
+    #     # Extract colors from the colormap
+    #     if hasattr(cmap, 'colors'):
+    #         palette_colors = cmap.colors  # For discrete colormaps
+    #     else:
+    #         # For continuous colormaps, sample evenly
+    #         palette_colors = cmap(np.linspace(0, 1, num_blocks))
+        
+    #     # Assign colors to each bar, cycling through the palette if necessary
+    #     colors = [palette_colors[i % len(palette_colors)] for i in range(num_blocks)]
+
     #     # Plotting
     #     fig, ax = plt.subplots(figsize=(12, 8))
 
     #     x_positions = np.arange(len(x_labels))
-    #     ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
+    #     bars = ax.bar(x_positions, counts_sorted, color=colors, edgecolor='black')
 
     #     ax.set_xticks(x_positions)
     #     ax.set_xticklabels(x_labels, fontsize=12)
 
     #     # Set labels and title
-    #     ax.set_xlabel(f"Sharing Patterns (Number of {target_elements_str} Atoms Sharing {neighbor_atom} Atoms)", fontsize=14)
+    #     ax.set_xlabel(f"Sharing Patterns (Number of {target_atom} Atoms Sharing Neighbor Atoms)", fontsize=14)
     #     ax.set_ylabel("Number of Instances", fontsize=14)
-    #     ax.set_title(f"Sharing Patterns of {neighbor_atom} Atoms among {target_elements_str} Atoms", fontsize=16)
+    #     ax.set_title(f"Sharing Patterns of Neighbor Atoms among {target_atom} Atoms", fontsize=16)
+
+    #     # Add count annotations above each bar
+    #     for bar in bars:
+    #         height = bar.get_height()
+    #         ax.text(
+    #             bar.get_x() + bar.get_width() / 2,  # X-coordinate: center of the bar
+    #             height,                             # Y-coordinate: top of the bar
+    #             f'{height}',                        # Text: the count
+    #             ha='center',                        # Horizontal alignment
+    #             va='bottom',                        # Vertical alignment
+    #             fontsize=12,
+    #             fontweight='bold',
+    #             color='black'
+    #         )
 
     #     # Show grid
     #     ax.grid(axis='y', linestyle='--', alpha=0.7)
 
+    #     # Optional: Add a legend mapping colors to patterns (if needed)
+    #     # This can be useful for clarity when using many colors
+    #     # Uncomment the following lines to add a legend
+    #     """
+    #     handles = [plt.Rectangle((0,0),1,1, color=colors[i]) for i in range(num_blocks)]
+    #     ax.legend(handles, x_labels, title="Sharing Patterns", bbox_to_anchor=(1.05, 1), loc='upper left')
+    #     """
+
     #     plt.tight_layout()
     #     plt.show()
 
-    def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb'):
+    def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb', color_palette='Pastel1'):
         """
         Plots a histogram where the x-axis represents specific sharing patterns between target atoms
         and neighbor atoms. The y-axis represents the number of instances of each sharing pattern.
@@ -2667,11 +1825,17 @@ class ClusterBatchAnalyzer:
         Parameters:
         - sharing_patterns (dict): The sharing patterns data.
         - target_atom (str): The target atom type to focus on (e.g., 'Pb').
+        - color_palette (str): The color palette to use for the histogram bars.
+                                Options: 'Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c'.
+                                Default is 'Pastel1'.
         """
-        import matplotlib.pyplot as plt
-        import numpy as np
-        from collections import defaultdict
-
+        # Supported color palettes
+        supported_palettes = ['Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c']
+        
+        # Validate the color_palette parameter
+        if color_palette not in supported_palettes:
+            raise ValueError(f"Invalid color_palette '{color_palette}'. Supported palettes are: {supported_palettes}")
+        
         # Data structures
         pattern_counts = defaultdict(int)  # Key: 'N_M', Value: count of instances
         total_instances_num_targets_eq_1 = 0  # To sum counts where num_targets == 1
@@ -2707,7 +1871,7 @@ class ClusterBatchAnalyzer:
         patterns_sorted = sorted(patterns, key=sort_key)
         counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
 
-        # Create x-axis labels with subscripts
+        # Create x-axis labels with subscripts (e.g., '1$_{0}$')
         x_labels = [label.replace('_', '$_{') + '}$' for label in patterns_sorted]
 
         # Debug: Print the patterns being assigned
@@ -2718,11 +1882,44 @@ class ClusterBatchAnalyzer:
             num_neighbors = int(num_neighbors)
             print(f"Pattern {num_targets}_{num_neighbors}: {pattern_counts[key]} instance(s)")
 
+        # Number of histogram blocks
+        num_blocks = len(x_labels)
+
+        # Helper function to get evenly spaced colors from a discrete palette
+        def get_evenly_spaced_colors(cmap, num_colors):
+            """
+            Retrieves a list of colors evenly spaced across the given colormap.
+
+            Parameters:
+            - cmap (matplotlib.colors.Colormap): The colormap to sample colors from.
+            - num_colors (int): The number of colors needed.
+
+            Returns:
+            - List of RGBA tuples.
+            """
+            if hasattr(cmap, 'colors'):
+                palette_colors = cmap.colors  # For discrete colormaps
+                if num_colors == 1:
+                    return [palette_colors[0]]
+                step = (len(palette_colors) - 1) / (num_colors - 1) if num_colors > 1 else 0
+                indices = [int(round(step * i)) for i in range(num_colors)]
+                colors = [palette_colors[idx] for idx in indices]
+            else:
+                # For continuous colormaps, sample evenly
+                colors = cmap(np.linspace(0, 1, num_colors))
+            return colors
+
+        # Retrieve the selected colormap
+        cmap = plt.get_cmap(color_palette)
+        
+        # Get evenly spaced colors from the colormap
+        colors = get_evenly_spaced_colors(cmap, num_blocks)
+
         # Plotting
         fig, ax = plt.subplots(figsize=(12, 8))
 
         x_positions = np.arange(len(x_labels))
-        ax.bar(x_positions, counts_sorted, color='skyblue', edgecolor='black')
+        bars = ax.bar(x_positions, counts_sorted, color=colors, edgecolor='black')
 
         ax.set_xticks(x_positions)
         ax.set_xticklabels(x_labels, fontsize=12)
@@ -2732,9 +1929,620 @@ class ClusterBatchAnalyzer:
         ax.set_ylabel("Number of Instances", fontsize=14)
         ax.set_title(f"Sharing Patterns of Neighbor Atoms among {target_atom} Atoms", fontsize=16)
 
+        # Add count annotations above each bar (non-bold)
+        for bar in bars:
+            height = bar.get_height()
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,  # X-coordinate: center of the bar
+                height,                             # Y-coordinate: top of the bar
+                f'{height}',                        # Text: the count
+                ha='center',                        # Horizontal alignment
+                va='bottom',                        # Vertical alignment
+                fontsize=12,
+                color='black'
+                # Removed fontweight='bold' to make the text non-bold
+            )
+
         # Show grid
         ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+        # Optional: Add a legend mapping colors to patterns (if needed)
+        # This can be useful for clarity when using many colors
+        # Uncomment the following lines to add a legend
+        """
+        handles = [plt.Rectangle((0,0),1,1, color=colors[i]) for i in range(num_blocks)]
+        ax.legend(handles, x_labels, title="Sharing Patterns", bbox_to_anchor=(1.05, 1), loc='upper left')
+        """
 
         plt.tight_layout()
         plt.show()
 
+    # Plotting Coordination Distribution Information
+    def prepare_coordination_distribution_data(self):
+        """
+        Prepares data for plotting the distribution of coordination numbers,
+        including the counts of specific coordination combinations.
+        """
+        import pandas as pd
+
+        data = []
+        for pdb_file, details_list in self.coordination_details.items():
+            for details in details_list:
+                target_atom_element = details['target_atom_element']
+                coordination_stats = details['coordination_stats']
+
+                # Collect coordination numbers with each neighbor element
+                neighbor_coords = {}
+                total_coordination_number = 0
+                for (target_elem, neighbor_elem), (coord_num, _) in coordination_stats.items():
+                    neighbor_coords[neighbor_elem] = coord_num
+                    total_coordination_number += coord_num
+
+                # Create a tuple representing the coordination combination
+                # We'll sort the items to ensure consistent ordering
+                coordination_combination = tuple(sorted(neighbor_coords.items()))
+
+                data.append({
+                    'Total Coordination Number': total_coordination_number,
+                    'Coordination Combination': coordination_combination,
+                    'Target Atom Element': target_atom_element
+                })
+
+        # Create a DataFrame
+        df = pd.DataFrame(data)
+
+        # Ensure 'Target Atom Element' is included in the grouping
+        coordination_distribution = df.groupby(
+            ['Total Coordination Number', 'Coordination Combination', 'Target Atom Element']
+        ).size().reset_index(name='Count')
+
+        # Calculate total counts for each total coordination number and target atom element
+        total_counts = coordination_distribution.groupby(
+            ['Total Coordination Number', 'Target Atom Element']
+        )['Count'].sum().reset_index(name='Total Count')
+
+        # Merge total counts back into the DataFrame
+        coordination_distribution = coordination_distribution.merge(
+            total_counts, on=['Total Coordination Number', 'Target Atom Element']
+        )
+
+        # Calculate the percentage for each coordination combination
+        coordination_distribution['Percentage'] = (
+            coordination_distribution['Count'] / coordination_distribution['Total Count']
+        ) * 100
+
+        # Sort the DataFrame for consistent plotting
+        coordination_distribution.sort_values(
+            by=['Total Coordination Number', 'Target Atom Element', 'Percentage'],
+            ascending=[True, True, False], inplace=True
+        )
+
+        self.coordination_distribution_df = coordination_distribution  # Store for later use
+
+    def format_combination_label(self, combination):
+        """
+        Formats the coordination combination tuple into a readable string.
+
+        Parameters:
+        - combination (tuple of tuples): Each tuple contains (element, coordination_number).
+
+        Returns:
+        - str: Formatted coordination combination.
+        """
+        if not combination:
+            return "None"
+
+        # Sort the combination for consistency
+        sorted_combination = sorted(combination, key=lambda x: x[0])
+
+        # Format each element and its coordination number
+        formatted_parts = [f"{elem}:{coord_num}" for elem, coord_num in sorted_combination]
+
+        # Join the parts with commas
+        formatted_label = ", ".join(formatted_parts)
+
+        return formatted_label
+
+    def format_combination_label_exclude(self, combination, exclude_atom):
+        """
+        Formats the coordination combination into a readable string,
+        excluding the specified neighbor atom.
+
+        Parameters:
+        - combination (tuple of tuples): Each tuple contains (element, coordination_number).
+        - exclude_atom (str): The neighbor atom type to exclude from the label.
+
+        Returns:
+        - str: Formatted coordination combination excluding the specified atom.
+        """
+        # Exclude the specified atom
+        filtered_combination = [(elem, coord_num) for elem, coord_num in combination if elem != exclude_atom]
+
+        if not filtered_combination:
+            return "None"
+
+        # Sort the combination for consistency
+        sorted_combination = sorted(filtered_combination, key=lambda x: x[0])
+
+        # Format each element and its coordination number
+        formatted_parts = [f"{elem}:{coord_num}" for elem, coord_num in sorted_combination]
+
+        # Join the parts with commas
+        formatted_label = ", ".join(formatted_parts)
+
+        return formatted_label
+
+    def plot_coordination_number_distribution(self):
+        """
+        Plots a stacked histogram of the total coordination numbers,
+        showing the distribution of specific coordination combinations.
+        Blocks are stacked in order based on the ratio of the two neighboring atoms.
+        In cases where one coordination atom is zero, blocks are stacked in ascending order
+        of the count of the other neighboring atom.
+
+        Only blocks representing ≥ 0.5% of the total are annotated.
+        The y-axis is expanded by 10% to accommodate annotations.
+        """
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        import seaborn as sns
+        import numpy as np
+        from matplotlib.colors import to_rgba
+        from matplotlib.ticker import MaxNLocator, AutoMinorLocator
+
+        # Ensure data is prepared
+        if not hasattr(self, 'coordination_distribution_df'):
+            self.prepare_coordination_distribution_data()
+        df = self.coordination_distribution_df.copy()
+
+        # Compute global total count
+        global_total_count = df['Count'].sum()
+
+        # Pivot the DataFrame
+        pivot_df = df.pivot_table(
+            index='Total Coordination Number',
+            columns='Coordination Combination',
+            values='Count',
+            aggfunc='sum',
+            fill_value=0
+        )
+
+        # Get the list of unique total coordination numbers
+        total_coord_numbers = pivot_df.index.tolist()
+
+        # Get neighbor elements for dynamic x-axis label
+        neighbor_elements = set()
+        for combination in df['Coordination Combination']:
+            for neighbor_elem, _ in combination:
+                neighbor_elements.add(neighbor_elem)
+        neighbor_elements = sorted(neighbor_elements)
+        neighbor_elements_str = ', '.join(neighbor_elements)
+
+        # Get target atom elements for dynamic labels
+        target_elements = df['Target Atom Element'].unique()
+        target_elements_str = ', '.join(target_elements)
+
+        # Define colors for each total coordination number from 'tab20b' palette
+        num_total_coord_numbers = len(total_coord_numbers)
+        full_color_palette = sns.color_palette('tab20b', 20)  # 'tab20b' has 20 colors
+
+        # Evenly space colors across the palette, cycling if necessary
+        if num_total_coord_numbers <= 20:
+            color_indices = np.linspace(0, 19, num=num_total_coord_numbers, dtype=int)
+        else:
+            # If more than 20 coordination numbers, cycle the palette
+            color_indices = np.tile(np.arange(20), int(np.ceil(num_total_coord_numbers / 20)))[:num_total_coord_numbers]
+        base_color_palette = [full_color_palette[i] for i in color_indices]
+        total_coord_color_map = dict(zip(total_coord_numbers, base_color_palette))
+
+        # Create a mapping of coordination combinations to shades
+        # We'll store the shades used for each combination to reuse in the next plot
+        self.combination_color_map = {}
+
+        # Precompute total counts for each total coordination number
+        total_counts_per_coord_num = df.groupby('Total Coordination Number')['Count'].sum().to_dict()
+
+        # Find the maximum total count
+        max_total_count = max(total_counts_per_coord_num.values())
+
+        # Calculate y_max and expand by 10%
+        y_max_original = ((int(max_total_count) + 9) // 10) * 10  # Original y_max rounded up to nearest 10
+        y_max = int(np.ceil(y_max_original * 1.1 / 10)) * 10    # Increase y_max by 10% and round up to nearest 10
+
+        # Set up the plot (Initialize once)
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.set_ylim(0, y_max)
+
+        # Set bar width to make columns narrower
+        bar_width = 0.5  # Adjust this value as needed (default is 0.8)
+
+        # Ensure neighbor_elements are sorted for consistent ordering
+        neighbor_elements = sorted(neighbor_elements)
+        if len(neighbor_elements) >= 2:
+            elem1, elem2 = neighbor_elements[0], neighbor_elements[1]
+        else:
+            # Handle cases with less than two neighbor elements
+            elem1 = neighbor_elements[0]
+            elem2 = None
+
+        # Loop over total coordination numbers to plot each bar
+        for idx, total_coord_num in enumerate(total_coord_numbers):
+            # Filter df for the current total coordination number
+            current_df = df[df['Total Coordination Number'] == total_coord_num]
+
+            # Sum counts for each coordination combination
+            counts = current_df.groupby('Coordination Combination')['Count'].sum()
+
+            # Get the precomputed total count for this total coordination number
+            total_count = total_counts_per_coord_num[total_coord_num]
+
+            # Base color for this total coordination number
+            base_color = total_coord_color_map[total_coord_num]
+            base_rgba = to_rgba(base_color)
+
+            # Generate shades for combinations
+            num_combinations = len(counts)
+            if num_combinations > 0:
+                shades = np.linspace(1.0, 0.6, num_combinations)
+            else:
+                shades = []
+
+            # Prepare combinations_counts list
+            combinations_counts = list(counts.items())
+
+            # Define sorting key function
+            def sorting_key_function(item):
+                combination, count = item
+                # Extract coordination numbers for neighbor elements
+                coord_nums = {elem: coord_num for elem, coord_num in combination}
+                # Get coordination numbers for the two neighbor elements
+                coord_num1 = coord_nums.get(elem1, 0)
+                coord_num2 = coord_nums.get(elem2, 0) if elem2 else 0
+                if coord_num1 > 0 and coord_num2 > 0:
+                    ratio = coord_num1 / coord_num2
+                    return (0, -ratio)
+                elif (coord_num1 == 0 and coord_num2 > 0) or (coord_num2 == 0 and coord_num1 > 0):
+                    # Stack in ascending order of the non-zero coordination number
+                    non_zero_coord_num = coord_num1 if coord_num1 > 0 else coord_num2
+                    return (1, non_zero_coord_num)
+                else:
+                    # Both coordination numbers are zero
+                    return (2, 0)
+
+            # Sort combinations based on the sorting key
+            sorted_combinations = sorted(combinations_counts, key=sorting_key_function)
+
+            # Now assign colors and plot
+            bottom = 0
+            for comb_idx, (combination, count) in enumerate(sorted_combinations):
+                if count == 0:
+                    continue  # Skip zero counts
+
+                # Calculate percentage
+                percentage = (count / global_total_count) * 100
+
+                if percentage >= 0.5:
+                    # Color for this block
+                    shade = shades[comb_idx]
+                    color = tuple(np.array(base_rgba[:3]) * shade) + (1.0,)
+
+                    # Save the color mapping for this combination
+                    self.combination_color_map[combination] = color
+
+                    # Compute global percentage
+                    global_percentage = percentage
+
+                    # Plot the block
+                    ax.bar(
+                        total_coord_num,
+                        count,
+                        bottom=bottom,
+                        color=color,
+                        edgecolor='black',
+                        width=bar_width,
+                        align='center'
+                    )
+
+                    # Determine text color based on background brightness
+                    brightness = np.mean(color[:3])
+                    text_color = 'black' if brightness > 0.5 else 'white'
+
+                    # Prepare the label (coordination combination only)
+                    label = f"{self.format_combination_label(combination)}"
+
+                    # Place the coordination combination label inside the block
+                    ax.text(
+                        total_coord_num,
+                        bottom + count / 2,
+                        label,
+                        ha='center',
+                        va='center',
+                        fontsize=10,
+                        rotation=0,
+                        color=text_color
+                    )
+
+                    # Place the global percentage annotation to the right of the block
+                    ax.text(
+                        total_coord_num + bar_width / 2 + 0.05,
+                        bottom + count / 2,
+                        f"{global_percentage:.1f}%",
+                        ha='left',
+                        va='center',
+                        fontsize=10,
+                        color='black'
+                    )
+                else:
+                    # Color for this block
+                    shade = shades[comb_idx]
+                    color = tuple(np.array(base_rgba[:3]) * shade) + (1.0,)
+
+                    # Save the color mapping for this combination even if not annotated
+                    self.combination_color_map[combination] = color
+
+                    # Plot the block without annotations
+                    ax.bar(
+                        total_coord_num,
+                        count,
+                        bottom=bottom,
+                        color=color,
+                        edgecolor='black',
+                        width=bar_width,
+                        align='center'
+                    )
+
+                bottom += count
+
+        # After plotting all bars, add total percentage annotations
+        for total_coord_num in total_coord_numbers:
+            total_count = total_counts_per_coord_num[total_coord_num]
+            total_percentage = (total_count / global_total_count) * 100
+
+            # Place the total percentage annotation at the top of the column
+            ax.text(
+                total_coord_num,
+                total_count + y_max * 0.01,  # Slightly above the top of the bar
+                f"{total_percentage:.1f}%",
+                ha='center',
+                va='bottom',
+                fontsize=10,
+                color='black'
+            )
+
+        # Set y-axis to integer ticks with a fixed number of ticks
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=10, integer=True))  # Fixed to 10 ticks
+
+        # Add minor ticks to the y-axis
+        ax.grid(which='minor', axis='y', linestyle='--', alpha=0.3)
+
+        # Set labels and title with enlarged font sizes
+        ax.set_xlabel(f'Total {target_elements_str} Coordination Number', fontsize=14)
+        ax.set_ylabel(f'Number of {target_elements_str} Atoms', fontsize=14)
+        ax.set_title('Distribution of Coordination Numbers and Environments', fontsize=16)
+
+        # Enlarge axis tick labels
+        ax.tick_params(axis='both', which='major', labelsize=12)
+
+        # Remove the legend if not needed
+        ax.legend().set_visible(False)
+
+        # Final layout adjustments and display the plot
+        plt.tight_layout()
+        plt.show()
+
+    def plot_neighbor_atom_distribution(self, neighbor_atom):
+        """
+        Plots a histogram where each bar represents the number of coordinated neighbor atoms,
+        and blocks within each bar are stacked based on Sharing Patterns from top down.
+
+        Only blocks representing ≥ 0.5% of the total are annotated.
+        The y-axis is expanded by 10% to accommodate annotations.
+
+        Parameters:
+        - neighbor_atom (str): The neighbor atom type to focus on (e.g., 'I').
+        """
+        import matplotlib.pyplot as plt
+        import pandas as pd
+        import seaborn as sns
+        import numpy as np
+        from matplotlib.colors import to_rgba
+        from matplotlib.ticker import MaxNLocator, AutoMinorLocator
+
+        # Ensure data is prepared
+        if not hasattr(self, 'coordination_distribution_df'):
+            self.prepare_coordination_distribution_data()
+        df = self.coordination_distribution_df.copy()
+
+        # Ensure combination_color_map is available
+        if not hasattr(self, 'combination_color_map'):
+            self.plot_coordination_number_distribution()  # This will generate the mapping
+            df = self.coordination_distribution_df.copy()
+
+        # Compute global total count
+        global_total_count = df['Count'].sum()
+
+        # Extract target atom elements for dynamic labels
+        target_elements = df['Target Atom Element'].unique()
+        target_elements_str = ', '.join(target_elements)
+
+        # Extract coordination number for the specified neighbor atom
+        def get_neighbor_coord_num(combination):
+            for elem, coord_num in combination:
+                if elem == neighbor_atom:
+                    return coord_num
+            return 0  # If the neighbor atom is not in the combination
+
+        df['Neighbor Coordination Number'] = df['Coordination Combination'].apply(get_neighbor_coord_num)
+
+        # Group by Neighbor Coordination Number, Coordination Combination, and Total Coordination Number
+        grouped_df = df.groupby(['Neighbor Coordination Number', 'Coordination Combination', 'Total Coordination Number'])['Count'].sum().reset_index()
+
+        # Precompute total counts for each neighbor coordination number
+        total_counts_per_neighbor_coord_num = grouped_df.groupby('Neighbor Coordination Number')['Count'].sum().to_dict()
+
+        # Find the maximum total count
+        max_total_count = max(total_counts_per_neighbor_coord_num.values())
+
+        # Calculate y_max and expand by 10%
+        y_max_original = ((int(max_total_count) + 9) // 10) * 10  # Original y_max rounded up to nearest 10
+        y_max = int(np.ceil(y_max_original * 1.1 / 10)) * 10    # Increase y_max by 10% and round up to nearest 10
+
+        # Set up the plot
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.set_ylim(0, y_max)
+
+        # Get the list of unique neighbor coordination numbers
+        neighbor_coord_numbers = sorted(grouped_df['Neighbor Coordination Number'].unique())
+
+        # Set bar width to make columns narrower
+        bar_width = 0.5  # Adjust as needed
+
+        # Define a function to format the combination label excluding the neighbor atom
+        def format_combination_label_exclude(combination, exclude_atom):
+            """
+            Formats the coordination combination into a readable string,
+            excluding the specified neighbor atom.
+
+            Parameters:
+            - combination (tuple of tuples): Each tuple contains (element, coordination_number).
+            - exclude_atom (str): The neighbor atom type to exclude from the label.
+
+            Returns:
+            - str: Formatted coordination combination excluding the specified atom.
+            """
+            # Exclude the specified atom
+            filtered_combination = [(elem, coord_num) for elem, coord_num in combination if elem != exclude_atom]
+
+            if not filtered_combination:
+                return "None"
+
+            # Sort the combination for consistency
+            sorted_combination = sorted(filtered_combination, key=lambda x: x[0])
+
+            # Format each element and its coordination number
+            formatted_parts = [f"{elem}:{coord_num}" for elem, coord_num in sorted_combination]
+
+            # Join the parts with commas
+            formatted_label = ", ".join(formatted_parts)
+
+            return formatted_label
+
+        # Loop over neighbor coordination numbers to plot each bar
+        for idx, neighbor_coord_num in enumerate(neighbor_coord_numbers):
+            # Filter data for the current neighbor coordination number
+            current_df = grouped_df[grouped_df['Neighbor Coordination Number'] == neighbor_coord_num]
+
+            # Sort combinations by 'Total Coordination Number' descending
+            sorted_combinations = current_df.sort_values('Total Coordination Number', ascending=False)
+
+            # Get the total count for this neighbor coordination number
+            total_count = total_counts_per_neighbor_coord_num[neighbor_coord_num]
+
+            bottom = 0
+            for _, row in sorted_combinations.iterrows():
+                combination = row['Coordination Combination']
+                count = row['Count']
+                total_coord_num = row['Total Coordination Number']
+
+                # Calculate percentage
+                percentage = (count / global_total_count) * 100
+
+                if percentage >= 0.5:
+                    # Retrieve the color from the combination_color_map
+                    color = self.combination_color_map.get(combination, (0.5, 0.5, 0.5, 1.0))  # Default to gray if not found
+
+                    # Compute global percentage
+                    global_percentage = percentage
+
+                    # Plot the block
+                    ax.bar(
+                        neighbor_coord_num,
+                        count,
+                        bottom=bottom,
+                        color=color,
+                        edgecolor='black',
+                        width=bar_width,
+                        align='center'
+                    )
+
+                    # Determine text color based on background brightness
+                    brightness = np.mean(color[:3])
+                    text_color = 'black' if brightness > 0.5 else 'white'
+
+                    # Prepare the label excluding the neighbor atom
+                    label = self.format_combination_label_exclude(combination, neighbor_atom)
+
+                    # Place the coordination combination label inside the block
+                    ax.text(
+                        neighbor_coord_num,
+                        bottom + count / 2,
+                        label,
+                        ha='center',
+                        va='center',
+                        fontsize=10,
+                        rotation=0,
+                        color=text_color
+                    )
+
+                    # Place the global percentage annotation to the right of the block
+                    ax.text(
+                        neighbor_coord_num + bar_width / 2 + 0.05,
+                        bottom + count / 2,
+                        f"{global_percentage:.1f}%",
+                        ha='left',
+                        va='center',
+                        fontsize=10,
+                        color='black'
+                    )
+                else:
+                    # Retrieve the color from the combination_color_map
+                    color = self.combination_color_map.get(combination, (0.5, 0.5, 0.5, 1.0))  # Default to gray if not found
+
+                    # Plot the block without annotations
+                    ax.bar(
+                        neighbor_coord_num,
+                        count,
+                        bottom=bottom,
+                        color=color,
+                        edgecolor='black',
+                        width=bar_width,
+                        align='center'
+                    )
+
+                bottom += count
+
+        # After plotting all blocks for each neighbor_coord_num, annotate the total percentage
+        for neighbor_coord_num in neighbor_coord_numbers:
+            total_count = total_counts_per_neighbor_coord_num[neighbor_coord_num]
+            total_percentage = (total_count / global_total_count) * 100
+
+            # Place the total percentage annotation at the top of the column
+            ax.text(
+                neighbor_coord_num,
+                total_count + y_max * 0.01,  # Slightly above the top of the bar
+                f"{total_percentage:.1f}%",
+                ha='center',
+                va='bottom',
+                fontsize=10,
+                color='black'
+            )
+
+        # Set y-axis to integer ticks with a fixed number of ticks
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=10))  # Fixed to 10 ticks
+
+        # Add minor ticks to the y-axis
+        ax.grid(which='minor', axis='y', linestyle='--', alpha=0.3)
+
+        # Set labels and title with enlarged font sizes
+        ax.set_xlabel(f'Number of Coordinated {neighbor_atom} Atoms', fontsize=14)
+        ax.set_ylabel(f'Number of {target_elements_str} Atoms', fontsize=14)
+        ax.set_title(f'Distribution of {neighbor_atom} Coordination Numbers', fontsize=16)
+
+        # Enlarge axis tick labels
+        ax.tick_params(axis='both', which='major', labelsize=12)
+
+        # Remove the legend if not needed
+        ax.legend().set_visible(False)
+
+        plt.tight_layout()
+        plt.show()
