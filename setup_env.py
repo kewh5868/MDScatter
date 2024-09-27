@@ -24,10 +24,12 @@ def setup_imports():
     from conversion.trajectory import TrajectoryProcessor
     from conversion.pdbeditor import PDBEditor
 
+    from tools.bulkvolume import BulkVolume, BulkVolumeParams
+
     print("Class imports have been set up.")
 
     # Return the imported classes
-    return RadiusOfGyrationCalculator, PDBEditor, TrajectoryProcessor, PDBFileHandler, Atom, ClusterNetwork, ClusterBatchAnalyzer
+    return BulkVolumeParams, BulkVolume, RadiusOfGyrationCalculator, PDBEditor, TrajectoryProcessor, PDBFileHandler, Atom, ClusterNetwork, ClusterBatchAnalyzer
 
 def setup_environment():
     # Setup paths and return the imported classes

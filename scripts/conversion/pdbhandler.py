@@ -1,4 +1,5 @@
 import re
+from typing import List, Dict
 
 class PDBFileHandler:
     def __init__(self, filepath, core_residue_names, shell_residue_names):
@@ -98,6 +99,44 @@ class PDBFileHandler:
         """
         for atom in self.core_atoms + self.shell_atoms:
             print(f"Atom ID: {atom.atom_id}, Name: {atom.atom_name}, Element: {atom.element}, Coordinates: {atom.coordinates}")
+
+    def count_solvent_molecules(self) -> int:
+        """
+        Counts the number of unique solvent molecules in the PDB file.
+        Each unique residue_number corresponds to one solvent molecule.
+        
+        Returns:
+        - count (int): Number of solvent molecules.
+        """
+        unique_residues = set(atom.residue_number for atom in self.shell_atoms)
+        return len(unique_residues)
+
+    def count_solute_molecules(self) -> int:
+        """
+        Counts the number of unique solute molecules in the PDB file.
+        Each unique residue_number corresponds to one solute molecule.
+        
+        Returns:
+        - count (int): Number of solute molecules.
+        """
+        unique_residues = set(atom.residue_number for atom in self.core_atoms)
+        return len(unique_residues)
+
+    def count_solute_atoms(self) -> Dict[str, int]:
+        """
+        Counts the number of instances of each unique solute element.
+        
+        Returns:
+        - atom_counts (Dict[str, int]): Dictionary mapping elements to their counts.
+        """
+        atom_counts: Dict[str, int] = {}
+        for atom in self.core_atoms:
+            element = atom.element
+            if element:  # Ensure element is not an empty string
+                atom_counts[element] = atom_counts.get(element, 0) + 1
+            else:
+                print(f"Warning: Atom ID {atom.atom_id} has no element specified.")
+        return atom_counts
 
 class Atom:
     def __init__(self, atom_id, atom_name, residue_name, residue_number, x, y, z, element):

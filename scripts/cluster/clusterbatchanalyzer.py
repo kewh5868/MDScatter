@@ -1,8 +1,6 @@
-import os
-import shutil
+import os, shutil, mendeleev, xraydb
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
-import xraydb
 import numpy as np
 from scipy.spatial import ConvexHull
 from scipy.linalg import eigh
@@ -11,40 +9,65 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 from tqdm.notebook import tqdm  # Import for Jupyter Notebook visual progress bar
-import mendeleev
 from mendeleev import element  # To fetch ionic radii
 from datetime import datetime
 from collections import defaultdict
+from typing import Optional, Dict
 
+# Custom Method Imports
 from conversion.pdbhandler import PDBFileHandler
 from cluster.radiusofgyration import RadiusOfGyrationCalculator
+from tools.bulkvolume import BulkVolume, BulkVolumeParams
 
 class ClusterBatchAnalyzer:
-    def __init__(self, pdb_directory, target_elements, neighbor_elements, distance_thresholds, 
-                 charges, core_residue_names=['PBI'], shell_residue_names=['DMS'], 
-                 volume_method='ionic_radius', copy_no_target_files=False):
-        self.pdb_directory = pdb_directory
+    def __init__(self, 
+                 pdb_directory, 
+                 target_elements, 
+                 neighbor_elements, 
+                 distance_thresholds, 
+                 charges, 
+                 core_residue_names=['PBI'], 
+                 shell_residue_names=['DMS'], 
+                 volume_method: Optional[str] = None,
+                 bulk_volume_params: Optional[BulkVolumeParams] = None, 
+                 copy_no_target_files=False):
+        
+        # Cluster Search Variables
         self.target_elements = target_elements
         self.neighbor_elements = neighbor_elements
         self.distance_thresholds = distance_thresholds
-        self.charges = charges
         self.core_residue_names = core_residue_names
         self.shell_residue_names = shell_residue_names
-        self.pdb_files = self._load_pdb_files()
+
+        # Statistics Information
         self.cluster_data = []
         self.cluster_size_distribution = defaultdict(list)
-        self.volume_method = volume_method
+        self.cluster_coordination_stats = {}
+        self.charges = charges
+
+        # File Management Information
+        self.pdb_directory = pdb_directory
+        self.pdb_files = self._load_pdb_files()
         self.copy_no_target_files = copy_no_target_files
         self.no_target_atoms_files = []
 
         self.sorted_folder = None  # Attribute to store the sorted folder path
         self.no_node_elements_folder = None  # Attribute for storing path for files with no node elements
-        self.cluster_coordination_stats = {}
 
-        # Only build the ionic radius lookup table if required
+        # Volume Methods Initialization
+        self.volume_method = volume_method
+        self.bulk_volume_params = bulk_volume_params
+        self.bulk_volume = None
+
+        ## Ionic Radius Calculation Method
         if self.volume_method == 'ionic_radius':
+            # Only build the ionic radius lookup table if required
             self.radius_lookup, _ = self.build_ionic_radius_lookup()
-
+        
+        ## Bulk Volume Calculation Method
+        if self.volume_method == 'bulk_volume':
+            self._initialize_bulk_volume()
+            
     ## -- Supporting Methods
     def _load_pdb_files(self):
         return [os.path.join(self.pdb_directory, f) for f in os.listdir(self.pdb_directory) if f.endswith('.pdb')]
@@ -216,6 +239,8 @@ class ClusterBatchAnalyzer:
                         # Make sure to include Rgx, Rgy, and Rgz in the return statement below if you need to store them
                     else:
                         raise ValueError(f"Unknown shape type: {shape_type}")
+                elif self.volume_method =='bulk_volume':
+                    cluster_volume = self.calculate_pdb_volume(pdb_handler)
                 else:
                     raise ValueError(f"Unknown volume method: {self.volume_method}")
 
@@ -262,29 +287,13 @@ class ClusterBatchAnalyzer:
             self.plot_average_volume_vs_cluster_size()
         elif self.volume_method == 'radius_of_gyration':
             self.plot_average_volume_vs_cluster_size_rg()
+        elif self.volume_method == 'bulk_volume':
+            self.plot_average_volume_vs_cluster_size()
+        
         self.plot_volume_percentage_of_scatterers(box_size_angstroms=53.4, num_boxes=250)
         self.plot_phi_Vc_vs_cluster_size()
 
         return coordination_stats_per_size
-
-    def calculate_volume_using_rg(self, pdb_handler, shape_type='sphere'):
-        """
-        Calculate the volume of the cluster using the radius of gyration.
-        
-        :param pdb_handler: The PDBFileHandler object for the current PDB file.
-        :param shape_type: 'sphere' or 'ellipsoid' to choose the volume calculation method.
-        :return: The calculated volume.
-        """
-        # Load data into the RadiusOfGyrationCalculator
-        self.rg_calculator.load_from_pdb(pdb_handler, self.charges)
-        
-        # Calculate volume based on the specified shape type
-        if shape_type == 'sphere':
-            return self.rg_calculator.calculate_volume(method='sphere')
-        elif shape_type == 'ellipsoid':
-            return self.rg_calculator.calculate_volume(method='ellipsoid')
-        else:
-            raise ValueError(f"Unknown shape type: {shape_type}")
 
     def generate_statistics(self):
         """
@@ -589,6 +598,95 @@ class ClusterBatchAnalyzer:
         return total_charge
 
     ## -- Volume Calculation Methods -- ##
+    # - Volume Method 0: Bulk Solvent Volume Calculation
+    def _initialize_bulk_volume(self):
+        if self.bulk_volume_params is None:
+            raise ValueError(
+                "bulk_volume_params must be provided when volume_method is 'bulk_volume'."
+            )
+        
+        # Validate that all required keys are present
+        required_keys = [
+            'mass_percent_solute',
+            'density_solution',
+            'density_neat_solvent',
+            'molar_mass_solvent',
+            'molar_mass_solute',
+            'ionic_radii',
+            'stoichiometry',
+            'atomic_masses',
+            'solute_residues',
+            'solvent_name'
+        ]
+        
+        missing_keys = [key for key in required_keys if key not in self.bulk_volume_params]
+        if missing_keys:
+            raise KeyError(f"Missing keys in bulk_volume_params: {missing_keys}")
+
+        # Instantiate BulkVolume with the provided parameters
+        self.bulk_volume = BulkVolume(**self.bulk_volume_params)
+        print("BulkVolume has been successfully initialized.")
+
+        self.bulk_volume.estimate_volumes()
+        print("Volumes estimated and stored as .volumes attribute in BulkVolume class instance.")
+
+    def calculate_pdb_volume(self, pdb_handler: PDBFileHandler) -> float:
+        """
+        Calculates the total volume of the PDB structure using BulkVolume and PDBFileHandler.
+        
+        Parameters:
+        - pdb_handler (PDBFileHandler): An instance of PDBFileHandler with parsed PDB data.
+        
+        Returns:
+        - total_volume (float): Total estimated volume in cubic angstroms (Å³).
+        """
+        if self.volume_method != 'bulk_volume':
+            raise ValueError("Volume estimation method is not set to 'bulk_volume'.")
+
+        if self.bulk_volume is None:
+            raise ValueError("BulkVolume instance is not initialized.")
+
+        # Generate the volume lookup table if not already done
+        if not self.bulk_volume.volumes:
+            self.bulk_volume.generate_volume_lookup(pdb_handler)
+            raise ValueError("BulkVolume does not contain a valid .volumes attribute.")
+
+        total_volume = 0.0
+
+        # 1. Calculate Solvent Volume
+        solvent_count = pdb_handler.count_solvent_molecules()
+        solvent_name = self.bulk_volume.solvent_name  # e.g., 'DMS'
+        solvent_info = self.bulk_volume.volumes.get(solvent_name, {}).get('Solvent', {})
+        solvent_volume_per_molecule = solvent_info.get('Volume per Molecule', 0.0)
+        solvent_total_volume = solvent_volume_per_molecule * solvent_count
+        total_volume += solvent_total_volume
+        print(f"Solvent Count: {solvent_count}, Volume per Molecule: {solvent_volume_per_molecule:.3f} Å³, "
+              f"Total Solvent Volume: {solvent_total_volume:.3f} Å³")
+
+        # 2. Calculate Solute Molecules Volume (if applicable)
+        # If solute molecules have 'Volume per Molecule' in lookup, handle them here
+        # This part is optional based on your BulkVolume setup
+        # For demonstration, we'll assume solute molecules do not have a separate volume
+
+        # 3. Calculate Solute Atoms Volume
+        solute_atom_counts = pdb_handler.count_solute_atoms()
+        solute_residue_names = set(self.bulk_volume.solute_residues.values())
+
+        for solute_residue in solute_residue_names:
+            for element, count in solute_atom_counts.items():
+                atom_info = self.bulk_volume.volumes.get(solute_residue, {}).get(element, {})
+                volume_per_atom = atom_info.get('Volume per Atom', 0.0)
+                if volume_per_atom > 0.0:
+                    atom_total_volume = volume_per_atom * count
+                    total_volume += atom_total_volume
+                    print(f"Solute Atom Type: {element}, Count: {count}, Volume per Atom: {volume_per_atom:.3f} Å³, "
+                          f"Total Atom Volume: {atom_total_volume:.3f} Å³")
+                else:
+                    print(f"Warning: Volume information for solute atom '{element}' not found in lookup.")
+
+        print(f"Total Estimated Volume: {total_volume:.3f} Å³")
+        return total_volume
+    
     # - Volume Method 1: Calculate Radius of Gyration for Volume Method
     def calculate_radius_of_gyration(self, atom_positions, electron_counts):
         """
@@ -629,6 +727,25 @@ class ClusterBatchAnalyzer:
             total_electrons = elem_info.electrons - self.charges.get(atom.element, (0, 0))[0]
             electron_counts.append(total_electrons)
         return electron_counts
+
+    def calculate_volume_using_rg(self, pdb_handler, shape_type='sphere'):
+        """
+        Calculate the volume of the cluster using the radius of gyration.
+        
+        :param pdb_handler: The PDBFileHandler object for the current PDB file.
+        :param shape_type: 'sphere' or 'ellipsoid' to choose the volume calculation method.
+        :return: The calculated volume.
+        """
+        # Load data into the RadiusOfGyrationCalculator
+        self.rg_calculator.load_from_pdb(pdb_handler, self.charges)
+        
+        # Calculate volume based on the specified shape type
+        if shape_type == 'sphere':
+            return self.rg_calculator.calculate_volume(method='sphere')
+        elif shape_type == 'ellipsoid':
+            return self.rg_calculator.calculate_volume(method='ellipsoid')
+        else:
+            raise ValueError(f"Unknown shape type: {shape_type}")
 
     def estimate_volume_using_rg(self, pdb_handler):
         """
@@ -1694,129 +1811,6 @@ class ClusterBatchAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    # def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb', color_palette='Pastel1'):
-    #     """
-    #     Plots a histogram where the x-axis represents specific sharing patterns between target atoms
-    #     and neighbor atoms. The y-axis represents the number of instances of each sharing pattern.
-        
-    #     Parameters:
-    #     - sharing_patterns (dict): The sharing patterns data.
-    #     - target_atom (str): The target atom type to focus on (e.g., 'Pb').
-    #     - color_palette (str): The color palette to use for the histogram bars.
-    #                             Options: 'Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c'.
-    #                             Default is 'Pastel1'.
-    #     """
-    #     # Supported color palettes
-    #     supported_palettes = ['Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c']
-        
-    #     # Validate the color_palette parameter
-    #     if color_palette not in supported_palettes:
-    #         raise ValueError(f"Invalid color_palette '{color_palette}'. Supported palettes are: {supported_palettes}")
-        
-    #     # Data structures
-    #     pattern_counts = defaultdict(int)  # Key: 'N_M', Value: count of instances
-    #     total_instances_num_targets_eq_1 = 0  # To sum counts where num_targets == 1
-
-    #     # Process sharing_patterns
-    #     for pattern, count in sharing_patterns.items():
-    #         num_targets, target_element, num_neighbors, neighbor_element = pattern
-
-    #         if target_element != target_atom:
-    #             continue  # Skip patterns not involving the specified target atom
-
-    #         if num_targets == 1:
-    #             # Sum all instances where num_targets == 1 under '1_0'
-    #             total_instances_num_targets_eq_1 += count
-    #         else:
-    #             # Create the 'N_M' label
-    #             key = f"{num_targets}_{num_neighbors}"
-    #             pattern_counts[key] += count
-
-    #     # Add the aggregated instances for num_targets == 1 under '1_0'
-    #     if total_instances_num_targets_eq_1 > 0:
-    #         pattern_counts['1_0'] = total_instances_num_targets_eq_1
-
-    #     # Prepare data for plotting
-    #     patterns = list(pattern_counts.keys())
-    #     counts = [pattern_counts[pattern] for pattern in patterns]
-
-    #     # Sort patterns for consistent plotting
-    #     def sort_key(label):
-    #         num_targets, num_neighbors = map(int, label.split('_'))
-    #         return (num_targets, num_neighbors)
-
-    #     patterns_sorted = sorted(patterns, key=sort_key)
-    #     counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
-
-    #     # Create x-axis labels with subscripts (e.g., '1$_{0}$')
-    #     x_labels = [label.replace('_', '$_{') + '}$' for label in patterns_sorted]
-
-    #     # Debug: Print the patterns being assigned
-    #     print("\nAssigned Sharing Patterns:")
-    #     for key in patterns_sorted:
-    #         num_targets, num_neighbors = key.split('_')
-    #         num_targets = int(num_targets)
-    #         num_neighbors = int(num_neighbors)
-    #         print(f"Pattern {num_targets}_{num_neighbors}: {pattern_counts[key]} instance(s)")
-
-    #     # Number of histogram blocks
-    #     num_blocks = len(x_labels)
-
-    #     # Retrieve the selected colormap
-    #     cmap = plt.get_cmap(color_palette)
-        
-    #     # Extract colors from the colormap
-    #     if hasattr(cmap, 'colors'):
-    #         palette_colors = cmap.colors  # For discrete colormaps
-    #     else:
-    #         # For continuous colormaps, sample evenly
-    #         palette_colors = cmap(np.linspace(0, 1, num_blocks))
-        
-    #     # Assign colors to each bar, cycling through the palette if necessary
-    #     colors = [palette_colors[i % len(palette_colors)] for i in range(num_blocks)]
-
-    #     # Plotting
-    #     fig, ax = plt.subplots(figsize=(12, 8))
-
-    #     x_positions = np.arange(len(x_labels))
-    #     bars = ax.bar(x_positions, counts_sorted, color=colors, edgecolor='black')
-
-    #     ax.set_xticks(x_positions)
-    #     ax.set_xticklabels(x_labels, fontsize=12)
-
-    #     # Set labels and title
-    #     ax.set_xlabel(f"Sharing Patterns (Number of {target_atom} Atoms Sharing Neighbor Atoms)", fontsize=14)
-    #     ax.set_ylabel("Number of Instances", fontsize=14)
-    #     ax.set_title(f"Sharing Patterns of Neighbor Atoms among {target_atom} Atoms", fontsize=16)
-
-    #     # Add count annotations above each bar
-    #     for bar in bars:
-    #         height = bar.get_height()
-    #         ax.text(
-    #             bar.get_x() + bar.get_width() / 2,  # X-coordinate: center of the bar
-    #             height,                             # Y-coordinate: top of the bar
-    #             f'{height}',                        # Text: the count
-    #             ha='center',                        # Horizontal alignment
-    #             va='bottom',                        # Vertical alignment
-    #             fontsize=12,
-    #             fontweight='bold',
-    #             color='black'
-    #         )
-
-    #     # Show grid
-    #     ax.grid(axis='y', linestyle='--', alpha=0.7)
-
-    #     # Optional: Add a legend mapping colors to patterns (if needed)
-    #     # This can be useful for clarity when using many colors
-    #     # Uncomment the following lines to add a legend
-    #     """
-    #     handles = [plt.Rectangle((0,0),1,1, color=colors[i]) for i in range(num_blocks)]
-    #     ax.legend(handles, x_labels, title="Sharing Patterns", bbox_to_anchor=(1.05, 1), loc='upper left')
-    #     """
-
-    #     plt.tight_layout()
-    #     plt.show()
-
     def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb', color_palette='Pastel1'):
         """
         Plots a histogram where the x-axis represents specific sharing patterns between target atoms
@@ -2546,3 +2540,128 @@ class ClusterBatchAnalyzer:
 
         plt.tight_layout()
         plt.show()
+
+'''
+    # def plot_sharing_pattern_histogram(self, sharing_patterns, target_atom='Pb', color_palette='Pastel1'):
+    #     """
+    #     Plots a histogram where the x-axis represents specific sharing patterns between target atoms
+    #     and neighbor atoms. The y-axis represents the number of instances of each sharing pattern.
+        
+    #     Parameters:
+    #     - sharing_patterns (dict): The sharing patterns data.
+    #     - target_atom (str): The target atom type to focus on (e.g., 'Pb').
+    #     - color_palette (str): The color palette to use for the histogram bars.
+    #                             Options: 'Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c'.
+    #                             Default is 'Pastel1'.
+    #     """
+    #     # Supported color palettes
+    #     supported_palettes = ['Pastel1', 'Pastel2', 'tab20a', 'tab20b', 'tab20c']
+        
+    #     # Validate the color_palette parameter
+    #     if color_palette not in supported_palettes:
+    #         raise ValueError(f"Invalid color_palette '{color_palette}'. Supported palettes are: {supported_palettes}")
+        
+    #     # Data structures
+    #     pattern_counts = defaultdict(int)  # Key: 'N_M', Value: count of instances
+    #     total_instances_num_targets_eq_1 = 0  # To sum counts where num_targets == 1
+
+    #     # Process sharing_patterns
+    #     for pattern, count in sharing_patterns.items():
+    #         num_targets, target_element, num_neighbors, neighbor_element = pattern
+
+    #         if target_element != target_atom:
+    #             continue  # Skip patterns not involving the specified target atom
+
+    #         if num_targets == 1:
+    #             # Sum all instances where num_targets == 1 under '1_0'
+    #             total_instances_num_targets_eq_1 += count
+    #         else:
+    #             # Create the 'N_M' label
+    #             key = f"{num_targets}_{num_neighbors}"
+    #             pattern_counts[key] += count
+
+    #     # Add the aggregated instances for num_targets == 1 under '1_0'
+    #     if total_instances_num_targets_eq_1 > 0:
+    #         pattern_counts['1_0'] = total_instances_num_targets_eq_1
+
+    #     # Prepare data for plotting
+    #     patterns = list(pattern_counts.keys())
+    #     counts = [pattern_counts[pattern] for pattern in patterns]
+
+    #     # Sort patterns for consistent plotting
+    #     def sort_key(label):
+    #         num_targets, num_neighbors = map(int, label.split('_'))
+    #         return (num_targets, num_neighbors)
+
+    #     patterns_sorted = sorted(patterns, key=sort_key)
+    #     counts_sorted = [pattern_counts[pattern] for pattern in patterns_sorted]
+
+    #     # Create x-axis labels with subscripts (e.g., '1$_{0}$')
+    #     x_labels = [label.replace('_', '$_{') + '}$' for label in patterns_sorted]
+
+    #     # Debug: Print the patterns being assigned
+    #     print("\nAssigned Sharing Patterns:")
+    #     for key in patterns_sorted:
+    #         num_targets, num_neighbors = key.split('_')
+    #         num_targets = int(num_targets)
+    #         num_neighbors = int(num_neighbors)
+    #         print(f"Pattern {num_targets}_{num_neighbors}: {pattern_counts[key]} instance(s)")
+
+    #     # Number of histogram blocks
+    #     num_blocks = len(x_labels)
+
+    #     # Retrieve the selected colormap
+    #     cmap = plt.get_cmap(color_palette)
+        
+    #     # Extract colors from the colormap
+    #     if hasattr(cmap, 'colors'):
+    #         palette_colors = cmap.colors  # For discrete colormaps
+    #     else:
+    #         # For continuous colormaps, sample evenly
+    #         palette_colors = cmap(np.linspace(0, 1, num_blocks))
+        
+    #     # Assign colors to each bar, cycling through the palette if necessary
+    #     colors = [palette_colors[i % len(palette_colors)] for i in range(num_blocks)]
+
+    #     # Plotting
+    #     fig, ax = plt.subplots(figsize=(12, 8))
+
+    #     x_positions = np.arange(len(x_labels))
+    #     bars = ax.bar(x_positions, counts_sorted, color=colors, edgecolor='black')
+
+    #     ax.set_xticks(x_positions)
+    #     ax.set_xticklabels(x_labels, fontsize=12)
+
+    #     # Set labels and title
+    #     ax.set_xlabel(f"Sharing Patterns (Number of {target_atom} Atoms Sharing Neighbor Atoms)", fontsize=14)
+    #     ax.set_ylabel("Number of Instances", fontsize=14)
+    #     ax.set_title(f"Sharing Patterns of Neighbor Atoms among {target_atom} Atoms", fontsize=16)
+
+    #     # Add count annotations above each bar
+    #     for bar in bars:
+    #         height = bar.get_height()
+    #         ax.text(
+    #             bar.get_x() + bar.get_width() / 2,  # X-coordinate: center of the bar
+    #             height,                             # Y-coordinate: top of the bar
+    #             f'{height}',                        # Text: the count
+    #             ha='center',                        # Horizontal alignment
+    #             va='bottom',                        # Vertical alignment
+    #             fontsize=12,
+    #             fontweight='bold',
+    #             color='black'
+    #         )
+
+    #     # Show grid
+    #     ax.grid(axis='y', linestyle='--', alpha=0.7)
+
+    #     # Optional: Add a legend mapping colors to patterns (if needed)
+    #     # This can be useful for clarity when using many colors
+    #     # Uncomment the following lines to add a legend
+    #     """
+    #     handles = [plt.Rectangle((0,0),1,1, color=colors[i]) for i in range(num_blocks)]
+    #     ax.legend(handles, x_labels, title="Sharing Patterns", bbox_to_anchor=(1.05, 1), loc='upper left')
+    #     """
+
+    #     plt.tight_layout()
+    #     plt.show()
+'''
