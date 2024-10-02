@@ -205,7 +205,6 @@ class ClusterBatchAnalyzer:
 
         num_threads = self.determine_safe_thread_count(task_type='cpu')
 
-        ## Setup processing for a single cluster file
         def process_pdb_file(pdb_file):
             try:
                 pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names, 
@@ -241,26 +240,24 @@ class ClusterBatchAnalyzer:
                     else:
                         raise ValueError(f"Unknown shape type: {shape_type}")
                 elif self.volume_method =='bulk_volume':
-                    # cluster_volume = self.calculate_pdb_volume(pdb_handler)
-                    cluster_volume, electron_density, delta_rho = self.calculate_pdb_volume_and_electron_density(pdb_handler)
+                    cluster_volume = self.calculate_pdb_volume(pdb_handler)
                 else:
                     raise ValueError(f"Unknown volume method: {self.volume_method}")
 
                 # Calculate cluster charge
                 cluster_charge = self.calculate_cluster_charge(pdb_handler)
 
-                return pdb_file, cluster_size, coordination_stats, cluster_volume, cluster_charge, electron_density, delta_rho
+                return pdb_file, cluster_size, coordination_stats, cluster_volume, cluster_charge
             except Exception as e:
                 print(f"Error processing file {pdb_file}: {e}")
                 return None, None, None, None, None
 
-        ## Here is where we batch process all of the clsuter information.
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = {executor.submit(process_pdb_file, pdb_file): pdb_file for pdb_file in self.pdb_files}
             for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing PDB files", ncols=100):
                 result = future.result()
                 if result[0] is not None:
-                    pdb_file, cluster_size, coordination_stats, cluster_volume, cluster_charge, electron_density, delta_rho = result
+                    pdb_file, cluster_size, coordination_stats, cluster_volume, cluster_charge = result
                     all_cluster_sizes.append(cluster_size)
                     for pair, (avg_coord, _) in coordination_stats.items():
                         coordination_stats_per_size[cluster_size][pair].append(avg_coord)
@@ -270,9 +267,7 @@ class ClusterBatchAnalyzer:
                         'cluster_size': cluster_size,
                         'coordination_stats': coordination_stats,
                         'volume': cluster_volume,
-                        'charge': cluster_charge,
-                        'electron_density': electron_density,
-                        'delta_rho': delta_rho
+                        'charge': cluster_charge
                     })
                     self.cluster_size_distribution[cluster_size].append(cluster_volume)
                 else:
@@ -286,7 +281,6 @@ class ClusterBatchAnalyzer:
 
         self.generate_statistics()
 
-        ## Plotting the output of the statistical distribution
         self.plot_cluster_size_distribution(all_cluster_sizes)
         self.plot_coordination_histogram(coordination_stats_per_size)
         if self.volume_method == 'ionic_radius':
@@ -296,7 +290,6 @@ class ClusterBatchAnalyzer:
         elif self.volume_method == 'bulk_volume':
             self.plot_average_volume_vs_cluster_size()
         
-        ## NOTE: Need to update this to generalize box_size input or to grab this dynamically.
         self.plot_volume_percentage_of_scatterers(box_size_angstroms=53.4, num_boxes=250)
         self.plot_phi_Vc_vs_cluster_size()
 
@@ -623,35 +616,19 @@ class ClusterBatchAnalyzer:
             'stoichiometry',
             'atomic_masses',
             'solute_residues',
-            'solvent_name',
-            # 'electrons_info' is optional and handled separately
+            'solvent_name'
         ]
         
         missing_keys = [key for key in required_keys if key not in self.bulk_volume_params]
         if missing_keys:
             raise KeyError(f"Missing keys in bulk_volume_params: {missing_keys}")
 
-        # Instantiate BulkVolume with the provided parameters, including electrons_info if present
+        # Instantiate BulkVolume with the provided parameters
         self.bulk_volume = BulkVolume(**self.bulk_volume_params)
         print("BulkVolume has been successfully initialized.")
 
-        # Estimate volumes
         self.bulk_volume.estimate_volumes()
         print("Volumes estimated and stored as .volumes attribute in BulkVolume class instance.")
-
-        # If electrons_info is provided, add electrons per unit
-        if self.bulk_volume.electrons_info is not None:
-            self.bulk_volume.add_electrons_per_unit()
-            print("Electrons per unit have been added to volumes.")
-        else:
-            print("No electrons_info provided; skipping add_electrons_per_unit().")
-
-        # Calculate solution electron density
-        try:
-            self.bulk_volume.calculate_solution_electron_density()
-            print(f"Calculated solution electron density: {self.bulk_volume.solution_electron_density_A3:.4e} electrons/Å³")
-        except ValueError as e:
-            print(f"Error calculating solution electron density: {e}")
 
     def calculate_pdb_volume(self, pdb_handler: PDBFileHandler) -> float:
         """
@@ -709,114 +686,7 @@ class ClusterBatchAnalyzer:
 
         print(f"Total Estimated Volume: {total_volume:.3f} Å³")
         return total_volume
-
-    def calculate_pdb_volume_and_electron_density(self, pdb_handler: PDBFileHandler) -> (float, float, float):
-        """
-        Calculates the total volume and electron density of the PDB structure using BulkVolume and PDBFileHandler.
-        Also calculates the difference between the solution electron density and the PDB electron density (delta_rho).
-        
-        Parameters:
-        - pdb_handler (PDBFileHandler): An instance of PDBFileHandler with parsed PDB data.
-        
-        Returns:
-        - total_volume (float): Total estimated volume in cubic angstroms (Å³).
-        - electron_density (float): Electron density of the PDB structure in electrons per cubic angstrom (electrons/Å³).
-        - delta_rho (float): Difference between the solution electron density and the PDB electron density (electrons/Å³).
-        """
-        if self.volume_method != 'bulk_volume':
-            raise ValueError("Volume estimation method is not set to 'bulk_volume'.")
-
-        if self.bulk_volume is None:
-            raise ValueError("BulkVolume instance is not initialized.")
-
-        # Ensure volumes are estimated
-        if not hasattr(self.bulk_volume, 'volumes') or not self.bulk_volume.volumes:
-            # Estimate volumes and populate self.bulk_volume.volumes
-            self.bulk_volume.estimate_volumes()
-            if not self.bulk_volume.volumes:
-                raise ValueError("BulkVolume does not contain a valid .volumes attribute.")
-
-        # Ensure electrons_info is provided
-        if self.bulk_volume.electrons_info is None:
-            raise ValueError("Electrons information (electrons_info) must be provided before calculating electron density.")
-
-        # Add electrons per unit if not already added
-        if not any(
-            'Electrons per Atom' in comp or 'Electrons per Molecule' in comp
-            for res in self.bulk_volume.volumes.values()
-            for comp in res.values()
-        ):
-            self.bulk_volume.add_electrons_per_unit()
-            print("Electrons per unit have been added to volumes.")
-
-        # Ensure solution electron density is calculated
-        if self.bulk_volume.solution_electron_density_A3 is None:
-            self.bulk_volume.calculate_solution_electron_density()
-            if self.bulk_volume.solution_electron_density_A3 is None:
-                raise ValueError("Failed to calculate solution electron density.")
-
-        total_volume = 0.0
-        total_electrons = 0.0
-
-        # 1. Calculate Solvent Volume and Electrons
-        solvent_count = pdb_handler.count_solvent_molecules()
-        solvent_name = self.bulk_volume.solvent_name  # e.g., 'DMS'
-        solvent_info = self.bulk_volume.volumes.get(solvent_name, {}).get('Solvent', {})
-        solvent_volume_per_molecule = solvent_info.get('Volume per Molecule', 0.0)
-        electrons_per_molecule = solvent_info.get('Electrons per Molecule', 0)
-        if solvent_volume_per_molecule > 0 and electrons_per_molecule > 0:
-            solvent_total_volume = solvent_volume_per_molecule * solvent_count
-            solvent_total_electrons = electrons_per_molecule * solvent_count
-            total_volume += solvent_total_volume
-            total_electrons += solvent_total_electrons
-            print(f"Solvent Count: {solvent_count}, Volume per Molecule: {solvent_volume_per_molecule:.3f} Å³, "
-                f"Total Solvent Volume: {solvent_total_volume:.3f} Å³, "
-                f"Electrons per Molecule: {electrons_per_molecule}, "
-                f"Total Solvent Electrons: {solvent_total_electrons}")
-        else:
-            raise ValueError("Missing volume or electron data for solvent.")
-
-        # 2. Calculate Solute Atoms Volume and Electrons
-        solute_atom_counts = pdb_handler.count_solute_atoms()
-        solute_residue_names = set(self.bulk_volume.solute_residues.values())
-
-        for solute_residue in solute_residue_names:
-            for element, count in solute_atom_counts.items():
-                # Map element to the format used in BulkVolume, if necessary
-                mapped_element = element
-                atom_info = self.bulk_volume.volumes.get(solute_residue, {}).get(mapped_element, {})
-                volume_per_atom = atom_info.get('Volume per Atom', 0.0)
-                electrons_per_atom = atom_info.get('Electrons per Atom', 0)
-                if volume_per_atom > 0.0 and electrons_per_atom > 0:
-                    atom_total_volume = volume_per_atom * count
-                    atom_total_electrons = electrons_per_atom * count
-                    total_volume += atom_total_volume
-                    total_electrons += atom_total_electrons
-                    print(f"Solute Atom Type: {mapped_element}, Count: {count}, Volume per Atom: {volume_per_atom:.3f} Å³, "
-                        f"Total Atom Volume: {atom_total_volume:.3f} Å³, "
-                        f"Electrons per Atom: {electrons_per_atom}, "
-                        f"Total Atom Electrons: {atom_total_electrons}")
-                else:
-                    raise ValueError(f"Volume or electron information for solute atom '{mapped_element}' not found in lookup.")
-
-        print(f"\nTotal Estimated Volume: {total_volume:.3f} Å³")
-        print(f"Total Electrons: {total_electrons}")
-
-        # Calculate electron density
-        if total_volume > 0:
-            electron_density = total_electrons / total_volume  # electrons/Å³
-            print(f"Electron Density of the PDB Structure: {electron_density:.4e} electrons/Å³")
-        else:
-            raise ValueError("Total volume is zero. Cannot calculate electron density.")
-
-        # Calculate delta_rho
-        solution_electron_density = self.bulk_volume.solution_electron_density_A3  # electrons/Å³
-        delta_rho = electron_density - solution_electron_density
-        print(f"Solution Electron Density: {solution_electron_density:.4e} electrons/Å³")
-        print(f"Electron Density Contrast (Delta Rho): {delta_rho:.4e} electrons/Å³")
-
-        return total_volume, electron_density, delta_rho
-
+    
     # - Volume Method 1: Calculate Radius of Gyration for Volume Method
     def calculate_radius_of_gyration(self, atom_positions, electron_counts):
         """
@@ -1016,6 +886,173 @@ class ClusterBatchAnalyzer:
         
         return total_volume
     
+    # - Volume Method 3: Convex Hull Method
+    def calculate_cluster_volume(self, pdb_handler):
+        all_atoms = pdb_handler.core_atoms + pdb_handler.shell_atoms
+        if len(all_atoms) < 4:
+            print(f"Not enough atoms to calculate Convex Hull. Returning 0 volume.")
+            return 0.0
+        
+        points = np.array([atom.coordinates for atom in all_atoms])
+        hull = ConvexHull(points)
+        return hull.volume
+    
+    def check_cluster_volume(self):
+        """
+        Loops through all clusters and plots the convex hull for a visual check.
+        """
+        for data in self.cluster_data:
+            pdb_file = data['pdb_file']
+            cluster_size = data['cluster_size']
+            pdb_handler = PDBFileHandler(pdb_file, core_residue_names=self.core_residue_names, 
+                                         shell_residue_names=self.shell_residue_names)
+            coordinates = np.array([atom.coordinates for atom in pdb_handler.core_atoms + pdb_handler.shell_atoms])
+            if len(coordinates) < 4:
+                print(f"Cluster size {cluster_size} is too small for Convex Hull calculation.")
+                continue
+
+            hull = ConvexHull(coordinates)
+            self.plot_convex_hull(coordinates, hull, cluster_size)
+
+    # - Volume Method 4: Scattering Cross Section Method
+    def obtain_crossections(self, atoms, energy=17000):
+        """
+        Calculate the coherent scattering cross-sections for each atom in the cluster.
+
+        Parameters:
+        - atoms: list of Atom objects, where each atom has 'element', 'coordinates'.
+        - energy: float, x-ray energy in eV for calculating the scattering cross-section (default is 17000 eV).
+
+        Returns:
+        - elements: np.array, corresponding element symbols for each atom.
+        - cross_sections: np.array, corresponding coherent scattering cross-section values for each atom.
+        """
+        elements = [atom.element for atom in atoms]
+        
+        # Use a set to avoid duplicate element lookups in xraydb
+        unique_elements = list(set(elements))
+        
+        # Precompute the cross-sections for unique elements
+        element_to_cross_section = {
+            element: xraydb.coherent_cross_section_elam(element, energy)
+            for element in unique_elements
+        }
+        
+        cross_sections = np.array([element_to_cross_section[element] for element in elements])
+
+        return np.array(elements), cross_sections
+
+    def calculate_coherentscattering_volume(self, atoms, energy=17000.0):
+        """
+        Calculate the total coherent scattering volume of a cluster based on the interaction volume per atom.
+
+        Parameters:
+        - atoms: list of Atom objects, where each atom has 'element', 'coordinates'.
+        - energy: float, x-ray energy in eV for calculating the scattering cross-section (default is 17000 eV).
+
+        Returns:
+        - cluster_volume: float, the estimated cluster volume in angstrom^3.
+        """
+        # Calculate elements and cross-sections
+        elements, cross_sections = self.obtain_crossections(atoms, energy)
+
+        # Use a set to avoid duplicate element lookups in xraydb
+        unique_elements = list(set(elements))
+        
+        # Precompute atomic masses and convert to grams per atom
+        element_to_grams_per_atom = {
+            element: xraydb.atomic_mass(element) / 6.022e23  # grams per atom
+            for element in unique_elements
+        }
+
+        # Convert cross-sections from cm²/gram to Å²/atom
+        cross_sections_angstrom = np.array([
+            cross_section * 1e16 * element_to_grams_per_atom[element]
+            for element, cross_section in zip(elements, cross_sections)
+        ])
+        
+        # Calculate interaction radii from cross-sections
+        interaction_radii = np.sqrt(cross_sections_angstrom / np.pi)
+
+        # Calculate volumes of spheres based on interaction radii
+        interaction_volumes = (4/3) * np.pi * (interaction_radii**3)
+
+        # Sum the interaction volumes to get the total cluster volume
+        total_cluster_volume = np.sum(interaction_volumes)
+
+        return total_cluster_volume
+
+    # - Volume Method 5: Voronoi Polyhedral Construction Method 
+    def fetch_ionic_radius(self, element_symbol):
+        """
+        Fetch the ionic radius of an element from the Mendeleev library.
+        """
+        elem = element(element_symbol)
+        
+        # Define the typical oxidation states for common elements
+        oxidation_states = {
+            'Pb': 2,   # Lead usually has a +2 oxidation state
+            'I': -1,   # Iodine usually has a -1 oxidation state
+            'S': -2,   # Sulfur typically has a -2 oxidation state
+            'O': -2,   # Oxygen typically has a -2 oxidation state
+            'H': 1,    # Hydrogen typically has a +1 oxidation state
+            'C': 4,    # Carbon typically has a +4 oxidation state in organic molecules (can vary)
+            'N': -3    # Nitrogen typically has a -3 oxidation state (can vary)
+            # Add other elements as needed
+        }
+        
+        # Fetch the appropriate oxidation state for the element
+        oxidation_state = oxidation_states.get(element_symbol, None)
+        
+        if oxidation_state is None:
+            raise ValueError(f"Unknown or unsupported element {element_symbol}")
+        
+        # Find the ionic radius that matches the oxidation state
+        for ionic_radius in elem.ionic_radii:
+            if ionic_radius.charge == oxidation_state:
+                return ionic_radius.ionic_radius
+        
+        raise ValueError(f"No ionic radius found for element {element_symbol} with oxidation state {oxidation_state}")
+
+    def calculate_geometric_center(self, centers):
+        return np.mean(centers, axis=0)
+
+    def generate_dodecahedron_vertices(self):
+        phi = (1 + np.sqrt(5)) / 2  # Golden ratio
+        vertices = np.array([
+            [-1, -1, -1], [1, -1, -1], [-1, 1, -1], [1, 1, -1],
+            [-1, -1, 1], [1, -1, 1], [-1, 1, 1], [1, 1, 1],
+            [0, -1/phi, -phi], [0, 1/phi, -phi], [0, -1/phi, phi], [0, 1/phi, phi],
+            [-1/phi, -phi, 0], [1/phi, -phi, 0], [-1/phi, phi, 0], [1/phi, phi, 0],
+            [-phi, 0, -1/phi], [phi, 0, -1/phi], [-phi, 0, 1/phi], [phi, 0, 1/phi]
+        ])
+        return vertices / np.linalg.norm(vertices[0])
+
+    def generate_outward_facing_points(self, position, radius, geometric_center):
+        direction = position - geometric_center
+        direction /= np.linalg.norm(direction)  # Normalize to unit length
+        vertices = self.generate_dodecahedron_vertices()
+        outward_facing_vertices = [vertex for vertex in vertices if np.dot(vertex, direction) > 0]
+        surface_points = position + radius * np.array(outward_facing_vertices)
+        return surface_points
+
+    def estimate_connected_volume_with_outward_facing_points(self, centers, radii):
+        geometric_center = self.calculate_geometric_center(centers)
+        all_points = []
+        for position, radius in zip(centers, radii):
+            surface_points = self.generate_outward_facing_points(position, radius, geometric_center)
+            all_points.append(surface_points)
+        all_points = np.vstack(all_points)
+        hull = ConvexHull(all_points)
+        connected_volume = hull.volume
+        return connected_volume, hull
+
+    def calculate_voronoi_volume(self, atoms):
+        centers = np.array([atom.coordinates for atom in atoms])
+        radii = np.array([self.fetch_ionic_radius(atom.element) for atom in atoms])
+        volume, hull = self.estimate_connected_volume_with_outward_facing_points(centers, radii)
+        return volume
+    
     ## -- SAXS Calculations
     def calculate_total_iq(self, q_values, shape_type='sphere'):
         """
@@ -1122,6 +1159,31 @@ class ClusterBatchAnalyzer:
             for i, (size, alpha) in enumerate(gloss_params):
                 circle = plt.Circle((xi - x_offset, yi + y_offset), size, color='white', alpha=alpha, transform=ax.transData, zorder=2+i)
                 ax.add_patch(circle)
+
+    def plot_convex_hull(self, coordinates, hull, cluster_size):
+        """
+        Plots the convex hull and the atomic coordinates of a cluster.
+
+        Parameters:
+        - coordinates: np.array, the atomic coordinates of the cluster.
+        - hull: ConvexHull object, the convex hull of the cluster.
+        - cluster_size: int, the size of the cluster.
+        """
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+
+        # Plotting the atomic coordinates
+        ax.scatter(coordinates[:, 0], coordinates[:, 1], coordinates[:, 2], color='r', s=100)
+
+        # Plotting the convex hull
+        for simplex in hull.simplices:
+            simplex = np.append(simplex, simplex[0])  # loop back to the first vertex
+            ax.plot(coordinates[simplex, 0], coordinates[simplex, 1], coordinates[simplex, 2], 'k-')
+
+        # Setting the title
+        ax.set_title(f'Convex Hull Visualization for Cluster Size {cluster_size}')
+
+        plt.show()
 
     def plot_cluster_size_distribution(self, all_cluster_sizes):
         unique_sizes, counts = np.unique(all_cluster_sizes, return_counts=True)
@@ -1349,61 +1411,61 @@ class ClusterBatchAnalyzer:
         plt.show()
 
     # def plot_coordination_histogram(self, coordination_stats_per_size, title=None):
-    #     sizes = sorted(coordination_stats_per_size.keys())
-    #     pairs = set(pair for data in coordination_stats_per_size.values() for pair in data.keys())
+        sizes = sorted(coordination_stats_per_size.keys())
+        pairs = set(pair for data in coordination_stats_per_size.values() for pair in data.keys())
 
-    #     coord_data = {pair: [np.mean(coordination_stats_per_size[size].get(pair, [0])) for size in sizes] for pair in pairs}
-    #     cluster_counts = [len(coordination_stats_per_size[size][next(iter(pairs))]) for size in sizes]
+        coord_data = {pair: [np.mean(coordination_stats_per_size[size].get(pair, [0])) for size in sizes] for pair in pairs}
+        cluster_counts = [len(coordination_stats_per_size[size][next(iter(pairs))]) for size in sizes]
 
-    #     # Calculate weighted averages
-    #     weighted_avgs = {}
-    #     for pair in pairs:
-    #         weighted_sum = sum(coord_data[pair][i] * cluster_counts[i] for i in range(len(sizes)))
-    #         total_clusters = sum(cluster_counts)
-    #         weighted_avgs[pair] = weighted_sum / total_clusters
+        # Calculate weighted averages
+        weighted_avgs = {}
+        for pair in pairs:
+            weighted_sum = sum(coord_data[pair][i] * cluster_counts[i] for i in range(len(sizes)))
+            total_clusters = sum(cluster_counts)
+            weighted_avgs[pair] = weighted_sum / total_clusters
 
-    #     # Default title if not provided
-    #     if title is None:
-    #         title = f'{self.target_elements[0]} Coordination Number v. Cluster Size'
+        # Default title if not provided
+        if title is None:
+            title = f'{self.target_elements[0]} Coordination Number v. Cluster Size'
 
-    #     plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(10, 6))
 
-    #     bottom = np.zeros(len(sizes))
+        bottom = np.zeros(len(sizes))
 
-    #     for pair in pairs:
-    #         neighbor_element = pair[1]
-    #         if neighbor_element == 'O':
-    #             color = (1.0, 0, 0, 0.7)  # red with 50% transparency
-    #         elif neighbor_element == 'I':
-    #             color = (0.3, 0, 0.3, 0.7)  # purple with 50% transparency
-    #         elif neighbor_element == 'S':
-    #             color = (0.545, 0.545, 0, 0.7)  # dark yellow with 50% transparency
-    #         else:
-    #             color = (0.5, 0.5, 0.5, 0.7)  # gray as a fallback
+        for pair in pairs:
+            neighbor_element = pair[1]
+            if neighbor_element == 'O':
+                color = (1.0, 0, 0, 0.7)  # red with 50% transparency
+            elif neighbor_element == 'I':
+                color = (0.3, 0, 0.3, 0.7)  # purple with 50% transparency
+            elif neighbor_element == 'S':
+                color = (0.545, 0.545, 0, 0.7)  # dark yellow with 50% transparency
+            else:
+                color = (0.5, 0.5, 0.5, 0.7)  # gray as a fallback
 
-    #         coord_values = np.array(coord_data[pair])
-    #         plt.bar(sizes, coord_values, bottom=bottom, color=color, edgecolor='black', linewidth=1, label=f"{pair[0]} - {pair[1]}")
-    #         bottom += coord_values
+            coord_values = np.array(coord_data[pair])
+            plt.bar(sizes, coord_values, bottom=bottom, color=color, edgecolor='black', linewidth=1, label=f"{pair[0]} - {pair[1]}")
+            bottom += coord_values
 
-    #     plt.axhline(y=5, color='gray', linestyle='--')  # Dashed line at y = 5
-    #     plt.ylim(0, 6.5)  # Increase y-axis bound to 6
+        plt.axhline(y=5, color='gray', linestyle='--')  # Dashed line at y = 5
+        plt.ylim(0, 6.5)  # Increase y-axis bound to 6
         
-    #     # Increase font sizes
-    #     plt.xlabel(f'Cluster Size ({self.target_elements[0]} Atom Count)', fontsize=14)
-    #     plt.ylabel(f'{self.target_elements[0]} Coordination Number', fontsize=14)
-    #     plt.xticks(fontsize=12)
-    #     plt.yticks(fontsize=12)
+        # Increase font sizes
+        plt.xlabel(f'Cluster Size ({self.target_elements[0]} Atom Count)', fontsize=14)
+        plt.ylabel(f'{self.target_elements[0]} Coordination Number', fontsize=14)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
         
-    #     # Place legend in a box on the right
-    #     plt.legend(frameon=True, fontsize=12, loc='upper right', bbox_to_anchor=(1, 1), edgecolor='black')
+        # Place legend in a box on the right
+        plt.legend(frameon=True, fontsize=12, loc='upper right', bbox_to_anchor=(1, 1), edgecolor='black')
 
-    #     # Add annotation with weighted averages in the top-left
-    #     annotation_text = 'Average Coordination Numbers:\n' + '\n'.join([f"{pair[0]} - {pair[1]}: {weighted_avgs[pair]:.2f}" for pair in pairs])
-    #     plt.annotate(annotation_text, xy=(0.02, 0.98), xycoords='axes fraction', ha='left', va='top', fontsize=12,
-    #                 bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor="white"))
+        # Add annotation with weighted averages in the top-left
+        annotation_text = 'Average Coordination Numbers:\n' + '\n'.join([f"{pair[0]} - {pair[1]}: {weighted_avgs[pair]:.2f}" for pair in pairs])
+        plt.annotate(annotation_text, xy=(0.02, 0.98), xycoords='axes fraction', ha='left', va='top', fontsize=12,
+                    bbox=dict(boxstyle="round,pad=0.3", edgecolor="black", facecolor="white"))
 
-    #     plt.title(title, fontsize=16)
-    #     plt.show()
+        plt.title(title, fontsize=16)
+        plt.show()
 
     def plot_phi_Vc_vs_cluster_size(self, box_size_angstroms=None, num_boxes=None):
         """
