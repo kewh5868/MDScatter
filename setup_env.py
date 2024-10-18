@@ -26,10 +26,12 @@ def setup_imports():
 
     from tools.bulkvolume import BulkVolume, BulkVolumeParams
 
+    from debyer.debyerbatch import DebyerBatch, prunePDB, calculate_number_density
+
     print("Class imports have been set up.")
 
     # Return the imported classes
-    return BulkVolumeParams, BulkVolume, RadiusOfGyrationCalculator, PDBEditor, TrajectoryProcessor, PDBFileHandler, Atom, ClusterNetwork, ClusterBatchAnalyzer
+    return calculate_number_density, DebyerBatch, prunePDB, BulkVolumeParams, BulkVolume, RadiusOfGyrationCalculator, PDBEditor, TrajectoryProcessor, PDBFileHandler, Atom, ClusterNetwork, ClusterBatchAnalyzer
 
 def setup_environment():
     # Setup paths and return the imported classes

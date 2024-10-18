@@ -59,6 +59,8 @@ class ClusterBatchAnalyzer:
         self.bulk_volume_params = bulk_volume_params
         self.bulk_volume = None
 
+        self.coordination_stats_per_size = None
+        
         ## Ionic Radius Calculation Method
         if self.volume_method == 'ionic_radius':
             # Only build the ionic radius lookup table if required
@@ -299,6 +301,8 @@ class ClusterBatchAnalyzer:
         ## NOTE: Need to update this to generalize box_size input or to grab this dynamically.
         self.plot_volume_percentage_of_scatterers(box_size_angstroms=53.4, num_boxes=250)
         self.plot_phi_Vc_vs_cluster_size()
+
+        self.coordination_stats_per_size = coordination_stats_per_size
 
         return coordination_stats_per_size
 
